@@ -15,7 +15,7 @@ show_typhoon_track/
 │   ├── FNV3P2_2026_10_14T00_00_paired (1).csv   # 真实预报导出文件
 │   ├── 真实CSV验收记录_20261014.md     # 数据结构核验与修复说明
 │   └── README.md                      # 演示代码详细使用说明
-├── agents.md                          # AI 编程 Agent 工作纪律与指南
+├── AGENTS.md                          # AI 编程 Agent 工作纪律与指南
 ├── Python 项目 L0–L6 分层验证规范.md    # Python 代码分层验证规范（强制参照）
 └── README.md                          # 本文件
 ```
@@ -63,7 +63,7 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
 
 ## 验证与测试
 
-本项目所有 Python 代码修改须参照[《Python 项目 L0–L6 分层验证规范.md》](<./Python 项目 L0–L6 分层验证规范.md>)执行分层验证（L0 语法编译 → L6 端到端验收），核心纪律：**未经实际执行的验证，不得声称已经通过**。工作纪律另见 [agents.md](./agents.md)。
+本项目所有 Python 代码修改须参照[《Python 项目 L0–L6 分层验证规范.md》](<./Python 项目 L0–L6 分层验证规范.md>)执行分层验证（L0 语法编译 → L6 端到端验收），核心纪律：**未经实际执行的验证，不得声称已经通过**。工作纪律另见 [AGENTS.md](./AGENTS.md)。
 
 ## 路线图
 
