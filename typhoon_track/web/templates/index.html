@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WNC 台风轨迹 · 数据集管理</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { border: 1px solid #ccc; padding: .3rem .5rem; font-size: .85rem; text-align: left; }
+  th { background: #f3f4f6; }
+  #upload-result { min-height: 1.2rem; white-space: pre-wrap; }
+  form > * { margin-right: .6rem; }
+</style>
+</head>
+<body>
+<h1>WNC 台风轨迹 · 数据集管理（M2）</h1>
+
+<section>
+  <h2>导入 CSV</h2>
+  <form id="upload-form">
+    <select id="kind">
+      <option value="forecast">预报轨迹（forecast）</option>
+      <option value="observation">观测轨迹（observation）</option>
+    </select>
+    <input type="file" id="file" accept=".csv,text/csv" required>
+    <button type="submit">上传并解析</button>
+  </form>
+  <p id="upload-result"></p>
+</section>
+
+<section>
+  <h2>历史数据集</h2>
+  <table>
+    <tr>
+      <th>数据集 ID</th><th>类型</th><th>原文件名</th><th>上传时间(UTC)</th>
+      <th>行数</th><th>气旋数</th><th>成员数</th><th>各气旋时效范围(h)</th>
+    </tr>
+    {% for d in datasets %}
+    <tr>
+      <td>{{ d.dataset_id }}</td>
+      <td>{{ d.kind }}</td>
+      <td>{{ d.original_filename }}</td>
+      <td>{{ d.created_at }}</td>
+      <td>{{ d.rows }}</td>
+      <td>{{ d.summary.storms | length }}</td>
+      <td>{{ d.summary.members | length if d.summary.members else '—' }}</td>
+      <td>
+        {% for s in d.summary.storms %}{{ s.storm }}: {{ s.lead_min }}–{{ s.lead_max }}；{% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<script>
+  // M2 最小上传交互；地图与筛选界面在 M3 落地
+  document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = document.getElementById('file').files[0];
+    const kind = document.getElementById('kind').value;
+    const body = new FormData();
+    body.append('file', file);
+    body.append('kind', kind);
+    const out = document.getElementById('upload-result');
+    try {
+      const res = await fetch('/api/datasets', { method: 'POST', body });
+      const data = await res.json();
+      if (res.ok) {
+        out.textContent = `导入成功：${data.dataset_id}（${data.rows} 行，` +
+          `${(data.summary.storms || []).length} 个气旋）`;
+        setTimeout(() => location.reload(), 900);
+      } else {
+        out.textContent = `导入失败：${data.detail}`;
+      }
+    } catch (err) {
+      out.textContent = `导入失败：${err}`;
+    }
+  });
+</script>
+</body>
+</html>

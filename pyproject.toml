@@ -3,3 +3,8 @@
 [tool.deptry]
 # 本地包与 demo_src 演示脚本不属于第三方依赖
 known_first_party = ["typhoon_track", "wnc_csv_demo"]
+
+[tool.deptry.per_rule_ignores]
+# 框架隐式使用的运行时依赖：uvicorn（部署命令）、jinja2（Jinja2Templates）、
+# python-multipart（FastAPI 文件/表单解析），代码中不直接 import 属预期
+DEP002 = ["uvicorn", "jinja2", "python-multipart"]

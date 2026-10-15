@@ -1,15 +1,13 @@
-# Import Linter 分层契约：api → service → core（AGENTS.md §5/§6）
-# M1 阶段 service/api 尚未落地，先固化 core 独立性；M2 补全分层契约。
+# Import Linter 分层契约：cli/api → service → core（AGENTS.md §5/§6）
 [importlinter]
 root_packages =
     typhoon_track
 
-[importlinter:contract:core-independence]
-name = core 层不得依赖上层模块（service/api/cli）
-type = forbidden
-source_modules =
-    typhoon_track.core
-forbidden_modules =
-    typhoon_track.service
-    typhoon_track.api
+[importlinter:contract:layers]
+name = 分层契约 cli/api → service → core（禁止反向依赖）
+type = layers
+layers =
     typhoon_track.cli
+    typhoon_track.api
+    typhoon_track.service
+    typhoon_track.core
