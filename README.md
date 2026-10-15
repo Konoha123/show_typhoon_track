@@ -13,22 +13,30 @@ show_typhoon_track/
 │   ├── test_wnc_csv_demo.py           # 9 项合成数据自检（无网络依赖）
 │   ├── test_wnc_csv_real.py           # 6 项真实数据回归（文件缺失时自动跳过）
 │   ├── FNV3P2_2026_10_14T00_00_paired (1).csv   # 真实预报导出文件
+│   ├── sample_synthetic_ensemble_mean.csv       # 合成单气旋集合均值样例
+│   ├── sample_synthetic_ensemble.csv            # 合成双成员样例（演示成员选取）
 │   ├── 真实CSV验收记录_20261014.md     # 数据结构核验与修复说明
 │   └── README.md                      # 演示代码详细使用说明
 ├── AGENTS.md                          # AI 编程 Agent 工作纪律与指南
+├── requirements.txt                    # 运行时依赖
+├── requirements-dev.txt                # 开发与验证依赖
+├── ruff.toml                           # L1 静态检查配置
+├── pyrightconfig.json                  # L2 类型检查配置
+├── pytest.ini                          # L5 测试配置
+├── pyproject.toml                      # L3 deptry 配置
 ├── Python 项目 L0–L6 分层验证规范.md    # Python 代码分层验证规范（强制参照）
 └── README.md                          # 本文件
 ```
 
 ## 环境准备
 
-- Conda 环境名：`show-typhoon-track`（Python 3.13，当前为空环境）
-- 已知数据处理依赖：`pandas>=2.0`（Web 服务与可视化依赖随开发补充）
+- Conda 环境名：`show-typhoon-track`（Python 3.13）
+- 依赖声明：`requirements.txt`（运行时，`pandas>=2.0`）；`requirements-dev.txt`（开发，额外含 ruff / pyright / deptry / import-linter / pytest）
 
 ```bash
 conda activate show-typhoon-track
-python --version
-python -m pip show pandas || python -m pip install 'pandas>=2.0'
+python -m pip install -r requirements.txt        # 仅运行
+python -m pip install -r requirements-dev.txt    # 开发与验证
 ```
 
 ## 快速开始（演示代码）
@@ -64,6 +72,16 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
 ## 验证与测试
 
 本项目所有 Python 代码修改须参照[《Python 项目 L0–L6 分层验证规范.md》](<./Python 项目 L0–L6 分层验证规范.md>)执行分层验证（L0 语法编译 → L6 端到端验收），核心纪律：**未经实际执行的验证，不得声称已经通过**。工作纪律另见 [AGENTS.md](./AGENTS.md)。
+
+常用验证命令（在 `show-typhoon-track` 环境内、项目根目录执行；配置见 `ruff.toml` / `pyrightconfig.json` / `pytest.ini` / `pyproject.toml`）：
+
+```bash
+python -m compileall -q demo_src      # L0 语法编译
+ruff check --no-fix .                 # L1 静态缺陷
+pyright                               # L2 静态类型
+python -m pip check && deptry .       # L3 依赖与架构
+python -m pytest -q                   # L5 功能测试（15 项基线）
+```
 
 ## 路线图
 

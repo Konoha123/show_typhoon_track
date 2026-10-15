@@ -1,0 +1,6 @@
+track_id,init_time,valid_time,lead_time_hours,lat,lon,maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,radius_of_maximum_winds_km,radius_34_knot_winds_ne_km,radius_34_knot_winds_se_km,radius_34_knot_winds_sw_km,radius_34_knot_winds_nw_km
+SYN202601,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,18.2,131.5,40,998,55,120,100,,110
+SYN202601,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,19.8,129.0,83,965,40,180,150,140,165
+SYN202601,2026-07-01T00:00:00Z,2026-07-03T00:00:00Z,48,22.0,126.2,94,947,28,240,200,190,220
+SYN202601,2026-07-01T00:00:00Z,2026-07-04T00:00:00Z,72,24.1,123.8,88,955,30,210,180,170,200
+SYN202601,2026-07-01T00:00:00Z,2026-07-05T00:00:00Z,96,25.6,121.9,80,960,38,160,140,130,150

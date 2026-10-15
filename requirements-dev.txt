@@ -1,0 +1,15 @@
+# 开发与验证依赖（包含运行时依赖）
+-r requirements.txt
+
+# L1 静态代码缺陷检查
+ruff>=0.17.0
+
+# L2 静态类型与接口检查（pip 包装包，实际需要 Node.js 运行时）
+pyright>=1.1.414
+
+# L3 依赖完整性与架构检查
+deptry>=0.25.1
+import-linter>=2.15
+
+# L5 功能与集成测试
+pytest>=9.1.1

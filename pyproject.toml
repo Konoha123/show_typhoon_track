@@ -1,0 +1,5 @@
+# 工具配置文件（依赖声明见 requirements*.txt，正式包结构落地后再补充 [project] 元数据）
+
+[tool.deptry]
+# demo_src 内测试对本地演示脚本的导入不是第三方依赖缺失
+known_first_party = ["wnc_csv_demo"]

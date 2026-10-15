@@ -1,0 +1,7 @@
+{
+  "include": ["."],
+  "exclude": ["**/__pycache__", ".git", "uploads"],
+  "ignore": ["demo_src"],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic"
+}

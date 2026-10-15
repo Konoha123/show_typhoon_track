@@ -13,7 +13,7 @@
 
 ## 2. 环境与依赖管理
 
-- **Conda 环境名**：`show-typhoon-track`（Python 3.13，目前为空环境，依赖随开发逐步安装）。
+- **Conda 环境名**：`show-typhoon-track`（Python 3.13；已安装 pandas 与开发验证工具，实际版本见 `requirements*.txt`）。
 - 每次工作前先激活并核对环境：
 
   ```bash
@@ -24,7 +24,9 @@
 
 - 当前终端解释器与目标环境不一致时，先定位正确环境，不得通过修改系统环境掩盖问题。
 - 依赖安装一律在 `show-typhoon-track` 环境内执行；目前已知的数据处理依赖为 `pandas>=2.0`（演示代码要求 Python 3.10+，本项目环境满足）。
-- 新增依赖后应回填到依赖声明文件（`requirements.txt` 或 `pyproject.toml`，落地后确定），不得只装不记。
+- 依赖声明已落地，分为两份，新增依赖后必须回填对应文件，不得只装不记：
+  - `requirements.txt`：运行时依赖（当前仅 `pandas>=2.0`）；
+  - `requirements-dev.txt`：开发与验证依赖（引用运行时文件，额外含 ruff / pyright / deptry / import-linter / pytest）。
 
 ## 3. 验证与测试纪律（强制）
 
@@ -64,8 +66,23 @@
 ## 5. 代码风格与结构约定
 
 - 项目正式源码在根目录建立独立包结构（落地时在此登记实际布局：入口、包名、测试目录）。
-- 静态检查配置（`ruff.toml` / `pyrightconfig.json` / `pytest.ini` 等）落地后，将实际执行的 lint / typecheck / test 命令登记于此，供每次任务结束前统一执行。
-- 在配置落地之前，最低要求：L0 编译检查 + 现有 unittest 全量回跑。
+- 静态检查与测试配置已落地：
+  - `ruff.toml`：L1（demo_src 按参考代码配置 per-file-ignores，正式源码保持零告警基线）；
+  - `pyrightconfig.json`：L2（当前 ignore demo_src，正式包落地即纳入检查；需在激活的目标环境内运行以解析第三方库类型）；
+  - `pytest.ini`：L5（`testpaths = demo_src`，正式测试目录落地后更新）；
+  - `pyproject.toml`：L3 deptry 的 `known_first_party` 配置（依赖声明仍以 requirements*.txt 为准）；
+  - `.importlinter` 契约待正式包结构落地后再配置。
+- 每次任务结束前统一执行（在 `show-typhoon-track` 环境内、项目根目录）：
+
+  ```bash
+  python -m compileall -q <源码目录>         # L0
+  ruff check --no-fix <源码目录或文件列表>   # L1
+  pyright <源码目录或文件列表>               # L2
+  python -m pip check && deptry .            # L3
+  python -m pytest -q                        # L5（现有基线 15 项）
+  ```
+
+- 最低要求：L0 编译检查 + 现有测试全量回跑。
 
 ## 6. 提交与变更纪律
 
@@ -85,6 +102,6 @@
 - [ ] 前端技术选型（地图库候选：Leaflet / Plotly / MapLibre 等）与是否前后端分离
 - [ ] 后端框架选型（FastAPI / Flask 等）与 API 设计
 - [ ] 页面导入 CSV 的上传存储策略（当前 `.gitignore` 预留 `uploads/`）
-- [ ] 依赖声明文件形式（`requirements.txt` / `pyproject.toml`）
-- [ ] ruff / pyright / pytest 配置落地
+- [x] 依赖声明文件形式：已采用 `requirements.txt`（运行时）+ `requirements-dev.txt`（开发）
+- [x] ruff / pyright / pytest / deptry 配置落地（`ruff.toml`、`pyrightconfig.json`、`pytest.ini`、`pyproject.toml`；`.importlinter` 待包结构）
 - [ ] 正式包结构与测试目录
