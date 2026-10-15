@@ -1,13 +1,24 @@
-"""REST 路由：CSV 双入口上传（kind=forecast|observation）与轨迹查询。"""
+"""REST 路由：CSV 双入口上传（kind=forecast|observation）与轨迹查询。
+
+输入输出结构由 .schemas 的 pydantic 契约定义，并同步进入 OpenAPI 文档。
+"""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from typhoon_track.service.datasets import KINDS, DatasetStore
 from typhoon_track.service.queries import track_rows
+
+from .schemas import (
+    DatasetListResponse,
+    DatasetMeta,
+    TrackFilters,
+    TrackPoint,
+    TracksResponse,
+)
 
 
 def register(app: FastAPI) -> None:
@@ -15,12 +26,14 @@ def register(app: FastAPI) -> None:
         store: DatasetStore = app.state.store
         return store
 
-    @app.post("/api/datasets", status_code=201)
+    @app.post("/api/datasets", status_code=201, response_model=DatasetMeta)
     async def create_dataset(
         file: Annotated[UploadFile, File()], kind: Annotated[str, Form()]
-    ) -> dict[str, Any]:
+    ) -> DatasetMeta:
         if kind not in KINDS:
-            raise HTTPException(status_code=400, detail=f"未知 kind: {kind}; 可选: {', '.join(KINDS)}")
+            raise HTTPException(
+                status_code=400, detail=f"未知 kind: {kind}; 可选: {', '.join(KINDS)}"
+            )
         content = await file.read()
         try:
             parsed = _store().create(
@@ -28,30 +41,24 @@ def register(app: FastAPI) -> None:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return dict(parsed.meta)
+        return DatasetMeta.model_validate(parsed.meta)
 
-    @app.get("/api/datasets")
-    def list_datasets() -> dict[str, Any]:
-        return {"datasets": _store().list()}
+    @app.get("/api/datasets", response_model=DatasetListResponse)
+    def list_datasets() -> DatasetListResponse:
+        metas = [DatasetMeta.model_validate(meta) for meta in _store().list()]
+        return DatasetListResponse(datasets=metas)
 
-    @app.get("/api/datasets/{dataset_id}")
-    def get_dataset(dataset_id: str) -> dict[str, Any]:
+    @app.get("/api/datasets/{dataset_id}", response_model=DatasetMeta)
+    def get_dataset(dataset_id: str) -> DatasetMeta:
         try:
-            return _store().get(dataset_id)
+            return DatasetMeta.model_validate(_store().get(dataset_id))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_id}") from exc
 
-    @app.get("/api/datasets/{dataset_id}/tracks")
+    @app.get("/api/datasets/{dataset_id}/tracks", response_model=TracksResponse)
     def get_tracks(
-        dataset_id: str,
-        storm: str | None = None,
-        member: str | None = None,
-        init: str | None = None,
-        model: str | None = None,
-        source: str | None = None,
-        max_lead_hours: float | None = None,
-        at_lead_hours: float | None = None,
-    ) -> dict[str, Any]:
+        dataset_id: str, filters: Annotated[TrackFilters, Query()]
+    ) -> TracksResponse:
         try:
             parsed = _store().load(dataset_id)
         except KeyError as exc:
@@ -59,29 +66,14 @@ def register(app: FastAPI) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
-            rows = track_rows(
-                parsed.frame,
-                storm=storm,
-                member=member,
-                init=init,
-                model=model,
-                source=source,
-                max_lead_hours=max_lead_hours,
-                at_lead_hours=at_lead_hours,
-            )
+            rows = track_rows(parsed.frame, **filters.model_dump())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        filters = {
-            key: value
-            for key, value in {
-                "storm": storm,
-                "member": member,
-                "init": init,
-                "model": model,
-                "source": source,
-                "max_lead_hours": max_lead_hours,
-                "at_lead_hours": at_lead_hours,
-            }.items()
-            if value is not None
-        }
-        return {"dataset_id": dataset_id, "kind": parsed.kind, "filters": filters, "count": len(rows), "rows": rows}
+        points = [TrackPoint.model_validate(row) for row in rows]
+        return TracksResponse(
+            dataset_id=dataset_id,
+            kind=parsed.kind,
+            filters=filters,
+            count=len(points),
+            rows=points,
+        )

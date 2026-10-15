@@ -49,7 +49,10 @@ def test_upload_forecast_and_query_tracks(client: TestClient) -> None:
 
     tracks = client.get(f"/api/datasets/{meta['dataset_id']}/tracks")
     assert tracks.status_code == 200
-    assert tracks.json()["count"] == 5
+    body = tracks.json()
+    assert body["count"] == 5
+    # 缺失字段保真：首行 SW 风圈缺失 → 显式 null（不臆造 0）
+    assert body["rows"][0]["r34_sw"] is None
 
     filtered = client.get(
         f"/api/datasets/{meta['dataset_id']}/tracks",
@@ -58,7 +61,19 @@ def test_upload_forecast_and_query_tracks(client: TestClient) -> None:
     body = filtered.json()
     assert body["count"] == 1
     assert body["rows"][0]["wind"] == 94
-    assert body["filters"] == {"storm": "syn202601", "at_lead_hours": 48}
+    # 结构化回显：字段齐全，未提供的条件为 null
+    assert body["filters"]["storm"] == "syn202601"
+    assert body["filters"]["at_lead_hours"] == 48
+    assert body["filters"]["member"] is None
+
+
+def test_openapi_documents_structured_contracts(client: TestClient) -> None:
+    document = client.get("/openapi.json").json()
+    schemas = document["components"]["schemas"]
+    for name in ("DatasetMeta", "DatasetListResponse", "TrackFilters",
+                 "TrackPoint", "TracksResponse"):
+        assert name in schemas, f"OpenAPI 缺少契约模型: {name}"
+    assert "storm" in schemas["TrackPoint"]["properties"]
 
 
 def test_upload_observation_kind(client: TestClient) -> None:

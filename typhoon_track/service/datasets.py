@@ -14,7 +14,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -26,7 +26,8 @@ from typhoon_track.core import (
     validate_track_table,
 )
 
-KINDS = ("forecast", "observation")
+Kind = Literal["forecast", "observation"]
+KINDS: tuple[str, ...] = ("forecast", "observation")
 
 _ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
 _SLUG_PATTERN = re.compile(r"[^0-9A-Za-z_-]+")
@@ -37,9 +38,16 @@ class ParsedDataset:
     """一次解析的完整结果：元数据 + 标准化表。"""
 
     dataset_id: str
-    kind: str
+    kind: Kind
     meta: dict[str, Any]
     frame: pd.DataFrame
+
+
+def as_kind(value: str) -> Kind:
+    """外部字符串收敛为 kind 字面量；未知值报错（文案供 API 层沿用）。"""
+    if value == "forecast" or value == "observation":
+        return value
+    raise ValueError(f"未知 kind: {value}; 可选: {', '.join(KINDS)}")
 
 
 def _new_dataset_id(filename: str) -> str:
@@ -72,8 +80,7 @@ class DatasetStore:
 
     def create(self, *, filename: str, content: bytes, kind: str) -> ParsedDataset:
         """保存原始文件并立即解析；解析失败则不留半成品目录。"""
-        if kind not in KINDS:
-            raise ValueError(f"未知 kind: {kind}; 可选: {', '.join(KINDS)}")
+        typed_kind = as_kind(kind)
         dataset_id = _new_dataset_id(filename)
         directory = self._root / dataset_id
         directory.mkdir(parents=True)
@@ -82,7 +89,7 @@ class DatasetStore:
             parsed = self._parse(
                 directory,
                 dataset_id=dataset_id,
-                kind=kind,
+                kind=typed_kind,
                 original_filename=filename,
                 created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             )
@@ -122,7 +129,7 @@ class DatasetStore:
         parsed = self._parse(
             directory,
             dataset_id=dataset_id,
-            kind=str(meta["kind"]),
+            kind=as_kind(str(meta["kind"])),
             original_filename=str(meta.get("original_filename", "original.csv")),
             created_at=str(meta.get("created_at", "")),
         )
@@ -137,7 +144,7 @@ class DatasetStore:
         directory: Path,
         *,
         dataset_id: str,
-        kind: str,
+        kind: Kind,
         original_filename: str,
         created_at: str,
     ) -> ParsedDataset:
