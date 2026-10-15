@@ -89,6 +89,11 @@
 - 不主动 commit / push，除非用户明确要求。
 - 提交前检查 `git status` 与 `git diff`，只暂存本次意图内的文件，不提交秘密信息与运行时产物。
 - 提交信息简洁并与仓库既有风格一致；一次提交聚焦一件事。
+- **里程碑单向依赖纪律**：里程碑及其对应提交只能单向依赖，即只允许后续里程碑依赖先前里程碑的成果（代码、配置、接口、验收资产），禁止任何反向依赖：
+  - 先行里程碑的提交不得 import、调用或假设后续里程碑才引入的模块、接口、字段与文件；
+  - 允许面向后续功能的设计预留（如配置项、可扩展参数），但该预留不得成为先行里程碑正常运行的必要条件；
+  - 每个里程碑收尾时复核：本里程碑的 diff 是否触及更晚里程碑专属文件、import 与调用关系是否无前向引用；发现违例则拆分提交或把功能回移到正确的里程碑。
+- 当前里程碑基线：M1 core 解析包 → M2 service+api（依赖 M1）→ M3 Web 页面与地图（依赖 M1/M2）→ M4 曲线联动与影响概率（依赖 M1–M3）；瓦片数据源切换等高级功能归入 M5+。
 
 ## 7. 验收记录留存
 
@@ -99,9 +104,10 @@
 
 以下事项确定后回填到上文对应章节，并保持本文件与项目现状一致：
 
-- [ ] 前端技术选型（地图库候选：Leaflet / Plotly / MapLibre 等）与是否前后端分离
-- [ ] 后端框架选型（FastAPI / Flask 等）与 API 设计
-- [ ] 页面导入 CSV 的上传存储策略（当前 `.gitignore` 预留 `uploads/`）
+- [x] 前端技术选型：轻方案（无构建链）——FastAPI + Jinja2 + 原生 ES Module JS + Leaflet（本地 vendor，不经 npm）；前后端分离但单体服务，本机单人使用
+- [x] 后端框架选型：FastAPI + uvicorn；包名 `typhoon_track`，分层契约 `api → service → core`（`.importlinter` 随 M1 落地）；CSV 双导入入口 `kind=forecast|observation`
+- [x] 页面导入 CSV 的上传存储策略：`uploads/<数据集id>/original.csv + meta.json`（含 kind），无数据库，按需重解析 + 进程内 LRU 缓存（`.gitignore` 已预留 `uploads/`）
+- [x] 瓦片：默认 AWS 瓦片源；URL 由根目录 `config.toml` 配置项提供（M3 落地），不硬编码；多瓦片源切换归入 M5+
 - [x] 依赖声明文件形式：已采用 `requirements.txt`（运行时）+ `requirements-dev.txt`（开发）
 - [x] ruff / pyright / pytest / deptry 配置落地（`ruff.toml`、`pyrightconfig.json`、`pytest.ini`、`pyproject.toml`；`.importlinter` 待包结构）
-- [ ] 正式包结构与测试目录
+- [ ] 正式包结构与测试目录（M1 落地时在 §5 登记）
