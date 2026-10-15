@@ -8,11 +8,14 @@
 
 ```
 show_typhoon_track/
-├── typhoon_track/                     # 正式包（分层：api → service → core）
+├── typhoon_track/                     # 正式包（分层：cli/api → service → core）
 │   ├── core/                          # 解析核心（纯函数：aliases/io/normalize/selection/summary/geo）
+│   ├── service/                       # 编排层（数据集存储+LRU、轨迹查询载荷）
+│   ├── api/                           # FastAPI 路由与应用工厂（uvicorn typhoon_track.api.app:app）
+│   ├── web/templates/                 # 页面模板（M2 管理页）
 │   ├── cli.py                         # 重组 CLI 入口（python -m typhoon_track）
 │   └── __main__.py
-├── tests/                             # 正式测试（core 单测 + CLI 行为一致性对照）
+├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
 ├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
 │   ├── test_wnc_csv_demo.py           # 9 项合成数据自检（无网络依赖）
@@ -72,6 +75,15 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' --list-tracks
 # 选取指定气旋/成员，读取前 48 小时路径与强度
 python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
   --storm WP962026 --member 9 --max-lead-hours 48
+```
+
+## 快速开始（Web 服务，M2）
+
+```bash
+conda activate show-typhoon-track
+python -m uvicorn typhoon_track.api.app:app --port 8000
+# 浏览器访问 http://127.0.0.1:8000 ：上传预报/观测 CSV，浏览数据集元数据
+# REST 接口：POST /api/datasets（file+kind）、GET /api/datasets、GET /api/datasets/{id}(/tracks)
 ```
 
 ## 数据说明
