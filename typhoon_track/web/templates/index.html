@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WNC 台风轨迹工作台</title>
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -50,9 +51,16 @@
 
   <p id="status" class="muted">就绪。请先导入或选择预报数据集。</p>
 </aside>
-<main id="map-wrap"><div id="map"></div></main>
+<main id="stage">
+  <div id="map-wrap"><div id="map"></div></div>
+  <div id="chart-wrap">
+    <div id="chart"></div>
+    <div id="chart-readout"></div>
+  </div>
+</main>
 
 <script src="/static/vendor/leaflet.js"></script>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script type="module" src="/static/app.js"></script>
 </body>

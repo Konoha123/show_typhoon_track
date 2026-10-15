@@ -41,6 +41,10 @@ def test_index_page_renders(client: TestClient) -> None:
     # 瓦片配置注入页面（来自根目录 config.toml，不硬编码）
     assert "server.arcgisonline.com" in response.text
     assert "/static/vendor/leaflet.js" in response.text
+    # M4 曲线联动：图表容器与 uPlot vendor 引用
+    assert 'id="chart"' in response.text
+    assert "/static/vendor/uPlot.iife.min.js" in response.text
+    assert "/static/vendor/uPlot.min.css" in response.text
 
 
 def test_static_vendor_served(client: TestClient) -> None:
@@ -52,6 +56,10 @@ def test_static_vendor_served(client: TestClient) -> None:
     assert css.status_code == 200
     own = client.get("/static/app.js")
     assert own.status_code == 200
+    uplot_js = client.get("/static/vendor/uPlot.iife.min.js")
+    assert uplot_js.status_code == 200
+    assert "uPlot" in uplot_js.text
+    assert client.get("/static/vendor/uPlot.min.css").status_code == 200
 
 
 def test_upload_forecast_and_query_tracks(client: TestClient) -> None:

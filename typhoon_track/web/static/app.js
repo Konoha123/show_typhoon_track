@@ -100,6 +100,149 @@ function sortedUnique(rows, field, numeric = false) {
   return list;
 }
 
+/* ---------- 强度曲线（M4 uPlot，与地图同源数据/同配色，双向联动） ---------- */
+
+const markersByKey = new Map(); // `${member}#${lead_h}` -> circleMarker（单成员模式点级联动）
+const linesByMember = new Map(); // member -> polyline（全部成员模式成员级联动）
+let chart = null;
+let chartMembers = [];
+let lastHighlight = null;
+
+const fmt = (v) => (v == null ? '—' : v);
+
+function destroyChart() {
+  if (chart) { chart.destroy(); chart = null; }
+  $('chart-readout').textContent = '';
+}
+
+function chartSize() {
+  const wrap = $('chart-wrap');
+  return {
+    width: Math.max(wrap.clientWidth - 16, 60),
+    height: Math.max(wrap.clientHeight - 10, 60),
+  };
+}
+
+function renderChart(rows) {
+  destroyChart();
+  if (!rows.length || typeof uPlot === 'undefined') return;
+  // x 轴档位 = 实际存在的 lead_h（不插值）；数据已与地图同截断于 leadCut
+  const leads = [...new Set(rows.map((r) => r.lead_h).filter((v) => v != null))]
+    .sort((a, b) => a - b);
+  if (!leads.length) return;
+  const { width, height } = chartSize();
+  const readout = $('chart-readout');
+  const cutoff = state.leadCut == null ? '全部' : `${state.leadCut} h`;
+  const baseAxes = [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }];
+
+  if (state.member !== 'ALL') {
+    const byLead = new Map(rows.map((r) => [r.lead_h, r]));
+    const wind = leads.map((l) => byLead.get(l)?.wind ?? null);
+    const pres = leads.map((l) => byLead.get(l)?.pressure ?? null);
+    chart = new uPlot(
+      {
+        width, height,
+        title: `成员 ${state.member}：风速/气压（截至 ${cutoff}）`,
+        legend: { show: true, live: true },
+        cursor: { drag: { x: false, y: false } },
+        scales: { x: { time: false }, y: {}, y2: {} },
+        axes: baseAxes.concat([{ label: '风速 (kt)' }, { side: 3, label: '气压 (hPa)' }]),
+        series: [
+          {},
+          { label: '风速 kt', scale: 'y', stroke: '#2563eb', width: 2, points: { space: 14, r: 3 } },
+          { label: '气压 hPa', scale: 'y2', stroke: '#dc2626', width: 2, dash: [5, 3], points: { space: 14, r: 3 } },
+        ],
+        hooks: {
+          setCursor: (u) => {
+            const idx = u.cursor.idx;
+            if (idx == null) { highlightMarker(null); readout.textContent = ''; return; }
+            const lead = u.data[0][idx];
+            highlightMarker(lead);
+            readout.textContent = `${lead} h | 风 ${fmt(u.data[1][idx])} kt | 压 ${fmt(u.data[2][idx])} hPa`;
+          },
+          ready: (u) => {
+            u.over.addEventListener('click', () => {
+              const idx = u.cursor.idx;
+              if (idx == null) return;
+              const marker = markersByKey.get(`${state.member}#${u.data[0][idx]}`);
+              if (marker) { marker.openPopup(); map.panTo(marker.getLatLng()); }
+            });
+          },
+        },
+      },
+      [leads, wind, pres],
+      $('chart'),
+    );
+    return;
+  }
+
+  // 全部成员：每成员风速细线（配色与地图意面图一致，同 groupBy 顺序取色）
+  const groups = groupBy(rows, (r) => r.member ?? '—');
+  chartMembers = [...groups.keys()];
+  const data = [leads].concat(
+    chartMembers.map((m) => {
+      const byLead = new Map(groups.get(m).map((r) => [r.lead_h, r.wind]));
+      return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
+    }),
+  );
+  chart = new uPlot(
+    {
+      width, height,
+      title: `成员风速曲线（${chartMembers.length} 成员，配色与地图一致）`,
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false }, prox: 5 },
+      focus: { alpha: 0.12 },
+      scales: { x: { time: false }, y: {} },
+      axes: baseAxes.concat([{ label: '风速 (kt)' }]),
+      series: [{}].concat(
+        chartMembers.map((m, i) => ({
+          label: `成员 ${m}`,
+          stroke: memberColor(i),
+          width: 1.2,
+          points: { show: false },
+          spanGaps: false,
+        })),
+      ),
+      hooks: {
+        setCursor: (u) => {
+          const idx = u.cursor.idx;
+          readout.textContent = idx == null ? '' : `${u.data[0][idx]} h`;
+        },
+        setSeries: (u, i, value) => {
+          const member = chartMembers[i - 1];
+          if (member == null) return;
+          const line = linesByMember.get(member);
+          if (!line) return;
+          const focused = value === true || (value != null && value.focus === true);
+          line.setStyle(focused ? { weight: 4, opacity: 1 } : { weight: 1.4, opacity: 0.85 });
+          if (focused) readout.textContent = `聚焦 成员 ${member}`;
+        },
+      },
+    },
+    data,
+    $('chart'),
+  );
+}
+
+function highlightMarker(lead) {
+  if (lastHighlight) { lastHighlight.setStyle({ radius: 4.5, weight: 0.8 }); lastHighlight = null; }
+  if (lead == null || state.member === 'ALL') return;
+  const marker = markersByKey.get(`${state.member}#${lead}`);
+  if (marker) { marker.setStyle({ radius: 7, weight: 2 }); marker.bringToFront(); lastHighlight = marker; }
+}
+
+function pointToChart(lead) {
+  if (!chart || lead == null) return;
+  const px = chart.valToPos(lead, 'x') + chart.bbox.left;
+  if (Number.isFinite(px)) chart.setCursor({ left: px });
+}
+
+function focusChartSeries(member, on) {
+  if (!chart || state.member !== 'ALL') return;
+  const idx = chartMembers.indexOf(member);
+  if (idx >= 0) chart.setSeries(idx + 1, { focus: on });
+}
+
 /* ---------- 渲染 ---------- */
 
 function currentForecastRows() {
@@ -114,6 +257,9 @@ function currentForecastRows() {
 function render() {
   forecastLayer.clearLayers();
   obsLayer.clearLayers();
+  markersByKey.clear();
+  linesByMember.clear();
+  lastHighlight = null;
 
   const bounds = [];
   const rows = currentForecastRows();
@@ -121,23 +267,37 @@ function render() {
   const groups = groupBy(rows, (r) => `${r.storm ?? r.name ?? '?'}#${r.member ?? '—'}`);
   let colorIndex = 0;
   for (const [key, group] of groups) {
+    const memberKey = group[0].member ?? '—';
     const coords = group.map(pointCoords).filter(Boolean);
     if (coords.length >= 2) {
-      L.polyline(coords, {
+      const line = L.polyline(coords, {
         color: singleMember ? '#374151' : memberColor(colorIndex),
         weight: singleMember ? 3 : 1.4,
         opacity: 0.85,
       }).addTo(forecastLayer);
+      if (!singleMember) {
+        linesByMember.set(memberKey, line);
+        line.on('mouseover', () => {
+          line.setStyle({ weight: 4, opacity: 1 });
+          focusChartSeries(memberKey, true);
+        });
+        line.on('mouseout', () => {
+          line.setStyle({ weight: 1.4, opacity: 0.85 });
+          focusChartSeries(memberKey, false);
+        });
+      }
     }
     if (singleMember) {
       for (const row of group) {
         const c = pointCoords(row);
         if (!c) continue;
         bounds.push(c);
-        L.circleMarker(c, {
+        const marker = L.circleMarker(c, {
           radius: 4.5, color: '#333', weight: 0.8,
           fillColor: windColor(row.wind), fillOpacity: 0.95,
         }).bindPopup(popupText(row, key)).addTo(forecastLayer);
+        markersByKey.set(`${row.member ?? '—'}#${row.lead_h}`, marker);
+        marker.on('mouseover', () => pointToChart(row.lead_h));
       }
     } else {
       for (const c of coords) bounds.push(c);
@@ -168,6 +328,7 @@ function render() {
   }
   setStatus(`预报 ${rows.length} 行 / 成员 ${groups.size} 组` +
     (state.obsId ? `；观测叠加 ${state.obsRows.length} 行` : ''));
+  renderChart(rows);
 }
 
 /* ---------- 控件联动 ---------- */
@@ -350,3 +511,10 @@ $('obs-dataset').addEventListener('change', onObsChange);
   refreshDatasets();
   if (state.fcId) await loadStormOptions();
 })();
+
+// 窗口尺寸变化仅重建曲线图（地图 Leaflet 自适应）
+let chartResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(() => renderChart(currentForecastRows()), 150);
+});
