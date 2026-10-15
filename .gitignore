@@ -1,0 +1,47 @@
+# IDE / 编辑器
+.idea/
+.vscode/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# Python 运行缓存与字节码
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 测试与静态检查缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+
+# 虚拟环境与打包产物
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# 前端（预留）
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# 运行时数据：页面导入的原始 CSV 存放目录
+uploads/
+
+# 演示脚本导出的选择结果产物
+selected*.csv
+selected_track.csv
+
+# 下载工具生成的原始数据目录
+ensemble_mean/
+ensemble/
