@@ -1,0 +1,3 @@
+# 第三方 vendor 文件按字节原样存储，不做换行符转换
+# （保证与 docs/瓦片数据源确认_20261015.md 记录的 sha256 一致）
+typhoon_track/web/static/vendor/* -text
