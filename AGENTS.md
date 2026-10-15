@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 现有测试基线：`demo_src` 下 `test_wnc_csv_demo.py`（9 项合成数据）+ `test_wnc_csv_real.py`（6 项真实数据，原始文件不在目录时自动跳过）。改动解析相关逻辑后必须回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 90 项）：`tests/` 下 core 单测与 CLI 行为一致性对照（真实 CSV 缺失自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py
@@ -65,7 +65,12 @@
 
 ## 5. 代码风格与结构约定
 
-- 项目正式源码在根目录建立独立包结构（落地时在此登记实际布局：入口、包名、测试目录）。
+- 正式包结构（M1/M1b 已落地，M2 增补 service/api）：
+  - 包名 `typhoon_track`，分层契约 `api → service → core`；
+  - `typhoon_track/core/`：解析核心（aliases / io / normalize / selection / summary / geo），纯函数、无打印，错误文案与演示脚本保持一致以支撑对照验证；
+  - `typhoon_track/cli.py` + `__main__.py`：重组 CLI 入口（`python -m typhoon_track`），与 `demo_src/wnc_csv_demo.py` 行为逐字节一致（`tests/test_cli_parity.py` 参数矩阵 × 数据集矩阵对照）；
+  - `tests/`：正式测试目录（core 单测 + CLI 行为一致性对照，pytest）；
+  - `.importlinter`：当前为 core 独立性契约，M2 落地 service/api 后升级为完整分层契约。
 - 静态检查与测试配置已落地：
   - `ruff.toml`：L1（demo_src 按参考代码配置 per-file-ignores，正式源码保持零告警基线）；
   - `pyrightconfig.json`：L2（当前 ignore demo_src，正式包落地即纳入检查；需在激活的目标环境内运行以解析第三方库类型）；
@@ -78,8 +83,8 @@
   python -m compileall -q <源码目录>         # L0
   ruff check --no-fix <源码目录或文件列表>   # L1
   pyright <源码目录或文件列表>               # L2
-  python -m pip check && deptry .            # L3
-  python -m pytest -q                        # L5（现有基线 15 项）
+  python -m pip check && deptry . && lint-imports   # L3
+  python -m pytest -q                        # L5（基线 90 项）
   ```
 
 - 最低要求：L0 编译检查 + 现有测试全量回跑。
@@ -111,4 +116,4 @@
 - [x] 瓦片：默认 AWS 瓦片源；URL 由根目录 `config.toml` 配置项提供（M3 落地），不硬编码；多瓦片源切换归入 M5+
 - [x] 依赖声明文件形式：已采用 `requirements.txt`（运行时）+ `requirements-dev.txt`（开发）
 - [x] ruff / pyright / pytest / deptry 配置落地（`ruff.toml`、`pyrightconfig.json`、`pytest.ini`、`pyproject.toml`；`.importlinter` 待包结构）
-- [ ] 正式包结构与测试目录（M1 落地时在 §5 登记）
+- [x] 正式包结构与测试目录（M1/M1b 已落地，登记于 §5）

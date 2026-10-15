@@ -8,7 +8,12 @@
 
 ```
 show_typhoon_track/
-├── demo_src/                          # 演示与参考代码（命令行版）
+├── typhoon_track/                     # 正式包（分层：api → service → core）
+│   ├── core/                          # 解析核心（纯函数：aliases/io/normalize/selection/summary/geo）
+│   ├── cli.py                         # 重组 CLI 入口（python -m typhoon_track）
+│   └── __main__.py
+├── tests/                             # 正式测试（core 单测 + CLI 行为一致性对照）
+├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
 │   ├── test_wnc_csv_demo.py           # 9 项合成数据自检（无网络依赖）
 │   ├── test_wnc_csv_real.py           # 6 项真实数据回归（文件缺失时自动跳过）
@@ -19,13 +24,14 @@ show_typhoon_track/
 │   └── README.md                      # 演示代码详细使用说明
 ├── AGENTS.md                          # AI 编程 Agent 工作纪律与指南
 ├── requirements.txt                    # 运行时依赖
-├── requirements-dev.txt                # 开发与验证依赖
+├── requirements-dev.txt               # 开发与验证依赖
 ├── ruff.toml                           # L1 静态检查配置
-├── pyrightconfig.json                  # L2 类型检查配置
+├── pyrightconfig.json                 # L2 类型检查配置
 ├── pytest.ini                          # L5 测试配置
 ├── pyproject.toml                      # L3 deptry 配置
+├── .importlinter                       # 分层契约
 ├── Python 项目 L0–L6 分层验证规范.md    # Python 代码分层验证规范（强制参照）
-└── README.md                          # 本文件
+└── README.md                           # 本文件
 ```
 
 ## 环境准备
@@ -39,9 +45,16 @@ python -m pip install -r requirements.txt        # 仅运行
 python -m pip install -r requirements-dev.txt    # 开发与验证
 ```
 
-## 快速开始（演示代码）
+## 快速开始
 
-在 `demo_src/` 目录下运行，详细用法见 `demo_src/README.md`：
+正式包提供与演示脚本行为等价的重组 CLI（推荐，项目根目录运行）：
+
+```bash
+python -m typhoon_track "demo_src/FNV3P2_2026_10_14T00_00_paired (1).csv" \
+  --storm WP962026 --member 9 --max-lead-hours 48
+```
+
+原始演示脚本在 `demo_src/` 下原样保留（行为对照基准），在该目录运行，详细用法见 `demo_src/README.md`：
 
 ```bash
 cd demo_src
@@ -76,11 +89,11 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
 常用验证命令（在 `show-typhoon-track` 环境内、项目根目录执行；配置见 `ruff.toml` / `pyrightconfig.json` / `pytest.ini` / `pyproject.toml`）：
 
 ```bash
-python -m compileall -q demo_src      # L0 语法编译
+python -m compileall -q typhoon_track  # L0 语法编译
 ruff check --no-fix .                 # L1 静态缺陷
 pyright                               # L2 静态类型
-python -m pip check && deptry .       # L3 依赖与架构
-python -m pytest -q                   # L5 功能测试（15 项基线）
+python -m pip check && deptry . && lint-imports   # L3 依赖与架构
+python -m pytest -q                   # L5 功能测试（90 项基线）
 ```
 
 ## 路线图
