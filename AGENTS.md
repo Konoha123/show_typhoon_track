@@ -70,7 +70,8 @@
   - `typhoon_track/core/`：解析核心（aliases / io / normalize / selection / summary / geo），纯函数、无打印，错误文案与演示脚本保持一致以支撑对照验证；
   - `typhoon_track/service/`：编排层（datasets：uploads 目录存储+LRU 解析缓存；queries：筛选与行级载荷、经度双约定）；
   - `typhoon_track/api/`：FastAPI 路由与应用工厂（`uvicorn typhoon_track.api.app:app`）；CSV 双导入入口 `kind=forecast|observation`；接口输入输出契约由 `api/schemas.py` 的 pydantic 模型定义（DatasetMeta / TrackFilters / TrackPoint / TracksResponse，同步进入 OpenAPI 文档）；
-  - `typhoon_track/web/templates/`：页面模板（M2 最小管理页，M3 落地地图页）；
+  - `typhoon_track/web/`：M3 地图工作台（templates + static：原生 ES Module JS、Leaflet 1.9.4 本地 vendor、观测叠加与时效滑块）；
+  - 根目录 `config.toml`：瓦片配置（url_template/attribution/max_zoom），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属 M5+；
   - `typhoon_track/cli.py` + `__main__.py`：重组 CLI 入口（`python -m typhoon_track`），与 `demo_src/wnc_csv_demo.py` 行为逐字节一致（`tests/test_cli_parity.py` 参数矩阵 × 数据集矩阵对照）；
   - `tests/`：正式测试目录（core 单测 + service/api 集成 + CLI 行为一致性对照，pytest）；
   - 端到端验收记录留存于根目录（如 `M2服务与上传验收记录_20261015.md`）。

@@ -37,7 +37,21 @@ def _upload(client: TestClient, name: str, content: bytes, kind: str = "forecast
 def test_index_page_renders(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "数据集管理" in response.text
+    assert "台风轨迹工作台" in response.text
+    # 瓦片配置注入页面（来自根目录 config.toml，不硬编码）
+    assert "server.arcgisonline.com" in response.text
+    assert "/static/vendor/leaflet.js" in response.text
+
+
+def test_static_vendor_served(client: TestClient) -> None:
+    js = client.get("/static/vendor/leaflet.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
+    assert "Leaflet 1.9.4" in js.text
+    css = client.get("/static/vendor/leaflet.css")
+    assert css.status_code == 200
+    own = client.get("/static/app.js")
+    assert own.status_code == 200
 
 
 def test_upload_forecast_and_query_tracks(client: TestClient) -> None:

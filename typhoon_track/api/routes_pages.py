@@ -1,7 +1,8 @@
-"""页面路由（M2 最小管理页：上传 + 数据集列表；M3 落地地图页）。"""
+"""页面路由（M3 地图工作台首页；数据集上传与选择在同一页面完成）。"""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,17 @@ def register(app: FastAPI, *, templates_dir: Path) -> None:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         store: Any = app.state.store
+        tile_config = app.state.tile_config
+        tile_json = json.dumps(
+            {
+                "urlTemplate": tile_config.url_template,
+                "attribution": tile_config.attribution,
+                "maxZoom": tile_config.max_zoom,
+            },
+            ensure_ascii=False,
+        )
         return templates.TemplateResponse(
-            request, "index.html", {"datasets": store.list()}
+            request,
+            "index.html",
+            {"datasets": store.list(), "tile_config": tile_json},
         )

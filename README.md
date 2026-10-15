@@ -12,10 +12,12 @@ show_typhoon_track/
 │   ├── core/                          # 解析核心（纯函数：aliases/io/normalize/selection/summary/geo）
 │   ├── service/                       # 编排层（数据集存储+LRU、轨迹查询载荷）
 │   ├── api/                           # FastAPI 路由与应用工厂（uvicorn typhoon_track.api.app:app）
-│   ├── web/templates/                 # 页面模板（M2 管理页）
+│   ├── web/                           # M3 地图工作台（templates + static + Leaflet 本地 vendor）
 │   ├── cli.py                         # 重组 CLI 入口（python -m typhoon_track）
 │   └── __main__.py
 ├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
+├── docs/                              # 验收与确认记录（含 M2/M3 验收、瓦片数据源确认）
+├── config.toml                        # 瓦片配置（url_template/attribution/max_zoom）
 ├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
 │   ├── test_wnc_csv_demo.py           # 9 项合成数据自检（无网络依赖）
@@ -77,12 +79,15 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
   --storm WP962026 --member 9 --max-lead-hours 48
 ```
 
-## 快速开始（Web 服务，M2）
+## 快速开始（Web 地图工作台，M3）
 
 ```bash
 conda activate show-typhoon-track
 python -m uvicorn typhoon_track.api.app:app --port 8000
-# 浏览器访问 http://127.0.0.1:8000 ：上传预报/观测 CSV，浏览数据集元数据
+# 浏览器访问 http://127.0.0.1:8000 ：
+#   - 上传预报/观测 CSV（双入口）→ 选择气旋/起报/成员 → 地图渲染轨迹
+#   - 成员"全部"为意面图；单成员按强度着色点位；观测轨迹黑虚线叠加；时效滑块只取实际存在档位
+# 瓦片数据源在 config.toml 配置（确认记录见 docs/瓦片数据源确认_20261015.md）
 # REST 接口：POST /api/datasets（file+kind）、GET /api/datasets、GET /api/datasets/{id}(/tracks)
 ```
 

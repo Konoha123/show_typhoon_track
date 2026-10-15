@@ -1,0 +1,7 @@
+# 地图配置（M3）：瓦片数据源只在此处配置，不硬编码进代码
+# 依据见 docs/瓦片数据源确认_20261015.md
+[tiles]
+# ESRI World Imagery（AWS 托管），ArcGIS REST 缓存服务标准模式（z/y/x 顺序）
+url_template = "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+attribution = "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community"
+max_zoom = 18
