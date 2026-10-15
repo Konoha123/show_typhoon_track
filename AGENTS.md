@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 测试基线（pytest，`testpaths = tests demo_src`，共 90 项）：`tests/` 下 core 单测与 CLI 行为一致性对照（真实 CSV 缺失自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 117 项）：`tests/` 下 core 单测与 CLI 行为一致性对照（真实 CSV 缺失自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py
