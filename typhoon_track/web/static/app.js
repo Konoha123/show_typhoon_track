@@ -35,9 +35,40 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
 
+/* M7b 轻量加载提示：状态栏分两层——idle 层（既有 setStatus 文案）与 busy 层（接口调用期文案）。
+ * busy 计数 > 0 时优先显示最近一次的加载文案，归零后恢复 idle 文案，避免交互无反馈被误判为卡死 */
+const statusModel = { idleText: '就绪。请先导入或选择预报数据集。', idleError: false, busyCount: 0, busyText: null };
+
+function renderStatus() {
+  if (statusModel.busyCount > 0 && statusModel.busyText != null) {
+    statusEl.textContent = statusModel.busyText;
+    statusEl.classList.remove('error');
+    return;
+  }
+  statusEl.textContent = statusModel.idleText;
+  statusEl.classList.toggle('error', statusModel.idleError);
+}
+
 function setStatus(text, isError = false) {
-  statusEl.textContent = text;
-  statusEl.classList.toggle('error', isError);
+  statusModel.idleText = text;
+  statusModel.idleError = isError;
+  renderStatus();
+}
+
+function busyStatus(text) {
+  statusModel.busyCount += 1;
+  statusModel.busyText = text;
+  renderStatus();
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      statusModel.busyCount -= 1;
+      if (statusModel.busyCount === 0) statusModel.busyText = null;
+      renderStatus();
+    },
+  };
 }
 
 function windColor(kt) {
@@ -50,16 +81,21 @@ function windColor(kt) {
 
 const memberColor = (index) => MEMBER_COLORS[index % MEMBER_COLORS.length];
 
-async function api(path, params) {
-  const query = params
-    ? '?' + new URLSearchParams(
-        Object.entries(params).filter(([, v]) => v != null && v !== ''),
-      ).toString()
-    : '';
-  const res = await fetch(path + query);
-  const body = await res.json();
-  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
-  return body;
+async function api(path, params, loadingText = '加载中…') {
+  const busy = busyStatus(loadingText); // M7b：所有接口调用期间显式提示
+  try {
+    const query = params
+      ? '?' + new URLSearchParams(
+          Object.entries(params).filter(([, v]) => v != null && v !== ''),
+        ).toString()
+      : '';
+    const res = await fetch(path + query);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+    return body;
+  } finally {
+    busy.release();
+  }
 }
 
 /* ---------- 地图 ---------- */
@@ -807,7 +843,7 @@ async function loadStats() {
   try {
     state.stats = await api(`/api/datasets/${state.fcId}/ensemble-stats`, {
       storm: state.storm, init: state.init,
-    });
+    }, '集合统计计算中…');
   } catch (err) {
     state.stats = null;
     setStatus(`集合统计获取失败：${err.message}`, true);
@@ -899,7 +935,7 @@ async function loadImpact() {
   try {
     state.impact = await api(`/api/datasets/${state.fcId}/impact-stats`, {
       lat: state.target.lat, lon: state.target.lon, storm: state.storm, init: state.init,
-    });
+    }, '影响统计计算中…');
   } catch (err) {
     state.impact = { error: err.message }; // 如缺风圈列：显式展示不可用原因，不回退
   }
@@ -938,7 +974,7 @@ function renderImpactCard() {
 
 async function loadPlaces() {
   try {
-    state.places = await api('/api/places');
+    state.places = await api('/api/places', undefined, '预存地点加载中…');
   } catch (err) {
     state.places = { available: false, places: [], warnings: [`预存地点获取失败：${err.message}`] };
   }
@@ -1159,7 +1195,7 @@ async function onStormChange() {
   state.storm = $('storm').value || null;
   if (!state.fcId || !state.storm) { state.fcRows = []; render(); return; }
   try {
-    const body = await api(`/api/datasets/${state.fcId}/tracks`, { storm: state.storm });
+    const body = await api(`/api/datasets/${state.fcId}/tracks`, { storm: state.storm }, '预报轨迹查询中…');
     state.fcRows = body.rows;
   } catch (err) {
     state.fcRows = [];
@@ -1195,7 +1231,7 @@ async function onObsChange() {
   if (state.obsId) {
     try {
       const body = await api(`/api/datasets/${state.obsId}/tracks`,
-        state.storm ? { storm: state.storm } : {});
+        state.storm ? { storm: state.storm } : {}, '观测轨迹查询中…');
       state.obsRows = body.rows;
     } catch (err) {
       try {
@@ -1219,13 +1255,16 @@ $('upload-form').addEventListener('submit', async (event) => {
   const body = new FormData();
   body.append('file', file);
   body.append('kind', $('upload-kind').value);
-  setStatus('上传解析中…');
+  // M7b：上传解析期间按钮禁用 + 状态栏 busy 文案（不走 api() 封装，单独处理）
+  const uploadButton = $('upload-form').querySelector('button');
+  uploadButton.disabled = true;
+  const busy = busyStatus('上传解析中…');
   try {
     const res = await fetch('/api/datasets', { method: 'POST', body });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     setStatus(`导入成功：${data.dataset_id}（${data.rows} 行，${(data.summary.storms || []).length} 个气旋）`);
-    state.datasets = (await api('/api/datasets')).datasets;
+    state.datasets = (await api('/api/datasets', undefined, '数据集列表加载中…')).datasets;
     refreshDatasets();
     const kind = data.kind;
     if (kind === 'forecast') {
@@ -1238,6 +1277,9 @@ $('upload-form').addEventListener('submit', async (event) => {
     }
   } catch (err) {
     setStatus(`导入失败：${err.message}`, true);
+  } finally {
+    busy.release();
+    uploadButton.disabled = false;
   }
 });
 
@@ -1338,7 +1380,7 @@ $('p-apply').addEventListener('click', () => {
 (async function init() {
   void loadPlaces(); // 预存地点独立加载（失败仅提示，不阻塞工作台）
   try {
-    state.datasets = (await api('/api/datasets')).datasets;
+    state.datasets = (await api('/api/datasets', undefined, '数据集列表加载中…')).datasets;
   } catch (err) {
     setStatus(`数据集列表获取失败：${err.message}`, true);
     return;

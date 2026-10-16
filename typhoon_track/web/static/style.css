@@ -20,6 +20,10 @@ button { background: #2563eb; color: #fff; border: 0; border-radius: 4px; paddin
 button:hover { background: #1d4ed8; }
 button.secondary { background: #64748b; }
 button.secondary:hover { background: #475569; }
+/* M7b：加载/上传期间禁用态按钮 */
+button:disabled { opacity: .55; cursor: not-allowed; }
+button:disabled:hover { background: #2563eb; }
+button.secondary:disabled:hover { background: #64748b; }
 input[type="range"] { width: 100%; margin-top: .3rem; }
 
 /* 中栏：地图独占剩余宽度 */

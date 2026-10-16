@@ -5,7 +5,8 @@ M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆
 低分母虚线、单成员模式隐藏统计卡；
 M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
 （含缺风圈列的显式不可用提示）；
-M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性。
+M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
+M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -503,3 +504,44 @@ def test_impact_card_shows_missing_radius_error(page, live_url: str) -> None:
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
     assert "缺少风圈字段" in text and "不提供距离回退" in text
+
+
+# ---------- M7b 接口调用加载提示（轻量：状态栏 busy 文案 + 上传按钮禁用） ----------
+
+
+def test_loading_status_during_slow_api(page, live_url_impact: str) -> None:
+    # 耗时接口期间状态栏显示"查询中/计算中/加载中"，结束后恢复非忙碌文案。
+    # goto 用 domcontentloaded：默认 load 会等远程瓦片，可能错过短暂的 busy 窗口
+    def delay(route):
+        time.sleep(0.8)
+        route.continue_()
+
+    page.route("**/tracks*", delay)
+    page.goto(live_url_impact, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => /(查询中|计算中|加载中)/.test(document.getElementById('status').textContent)"
+    )
+    page.wait_for_function(
+        "() => !/(查询中|计算中|加载中)/.test(document.getElementById('status').textContent)"
+    )
+    page.wait_for_selector('path[data-member="01"]')
+
+
+def test_upload_button_disabled_while_parsing(page, live_url: str) -> None:
+    # 上传解析期间按钮禁用，完成后恢复可用并显示导入成功
+    def delay(route):
+        time.sleep(0.8)
+        route.continue_()
+
+    page.route("**/api/datasets", delay)
+    page.goto(live_url, wait_until="domcontentloaded")
+    page.wait_for_selector("#storm option", state="attached")
+    page.set_input_files("#upload-file", MEMBERS)
+    submit = page.locator("#upload-form button[type=submit]")
+    submit.click()
+    assert submit.is_disabled()
+    page.wait_for_timeout(2500)  # 0.8s 延迟 + 数据集列表刷新与 storm 链路
+    assert not submit.is_disabled()
+    # 上传链路完成：预报数据集下拉增至 2 项，且状态栏被后续行数文案接管（导入成功已被覆盖，属既有行为）
+    assert page.locator("#fc-dataset option").count() == 2
+    assert "行 / 成员" in page.locator("#status").inner_text()
