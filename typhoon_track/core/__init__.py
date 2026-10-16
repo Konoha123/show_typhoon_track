@@ -20,7 +20,22 @@ from .ensemble import (
     ensemble_profile,
     wind_category,
 )
-from .geo import haversine_km, signed_longitude, spherical_mean
+from .geo import (
+    compass_16,
+    haversine_km,
+    initial_bearing_deg,
+    signed_longitude,
+    spherical_mean,
+)
+from .impact import (
+    WIND_THRESHOLDS,
+    ClosestApproach,
+    ImpactProfile,
+    ThresholdImpact,
+    impact_profile,
+    point_in_wind_field,
+    quadrant_of_bearing,
+)
 from .io import make_mapping, read_csv
 from .normalize import NormalizedResult, normalize, validate_track_table
 from .selection import exact_filter, filter_rows, select_track
@@ -35,25 +50,34 @@ from .summary import (
 __all__ = [
     "ALIASES",
     "CATEGORY_STACK_BOTTOM_UP",
+    "ClosestApproach",
     "DEFAULT_P_VALUES",
     "DatasetSummary",
     "DISSIPATED_COLOR",
     "DISSIPATED_KEY",
     "DISSIPATED_LABEL",
+    "ImpactProfile",
     "LOW_DENOMINATOR_FRACTION",
     "LeadProfile",
     "NormalizedResult",
     "StormOverview",
+    "ThresholdImpact",
     "UNKNOWN_COLOR",
     "UNKNOWN_KEY",
     "WIND_CATEGORIES",
+    "WIND_THRESHOLDS",
     "WindCategory",
+    "compass_16",
     "ensemble_profile",
     "exact_filter",
     "filter_rows",
     "haversine_km",
+    "impact_profile",
+    "initial_bearing_deg",
     "make_mapping",
     "normalize",
+    "point_in_wind_field",
+    "quadrant_of_bearing",
     "read_csv",
     "ri_changes",
     "select_track",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pandas as pd
 
@@ -43,7 +44,7 @@ def summarize_tracks(out: pd.DataFrame) -> DatasetSummary:
     storms: list[StormOverview] = []
     for storm, group in out.groupby("storm", sort=True, dropna=False):
         member_count = (
-            int(group["member"].nunique(dropna=True)) if "member" in group else None
+            int(cast("int", group["member"].nunique(dropna=True))) if "member" in group else None
         )
         lead_min: float | None = None
         lead_max: float | None = None

@@ -9,6 +9,11 @@ import pandas as pd
 _EARTH_RADIUS_KM = 6371.0088
 _DEG2RAD = math.pi / 180.0
 
+_COMPASS_16: tuple[str, ...] = (
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+)
+
 
 def signed_longitude(lon: pd.Series) -> pd.Series:
     """0–360° 经度约定转换为 −180–180°；已为负值时幂等；缺失保持缺失。
@@ -27,6 +32,28 @@ def haversine_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> floa
     d_lam = (lon_b - lon_a) * _DEG2RAD
     h = math.sin(d_phi / 2.0) ** 2 + math.cos(phi_a) * math.cos(phi_b) * math.sin(d_lam / 2.0) ** 2
     return 2.0 * _EARTH_RADIUS_KM * math.asin(math.sqrt(min(h, 1.0)))
+
+
+def initial_bearing_deg(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    """A→B 的大圆初始方位角（度，正北 0°、顺时针 0–360°）；两套经度约定结果一致。
+
+    A 与 B 重合时 atan2(0, 0) = 0，返回 0°（正北）。
+    """
+    phi_a = lat_a * _DEG2RAD
+    phi_b = lat_b * _DEG2RAD
+    d_lam = (lon_b - lon_a) * _DEG2RAD
+    y = math.sin(d_lam) * math.cos(phi_b)
+    x = math.cos(phi_a) * math.sin(phi_b) - math.sin(phi_a) * math.cos(phi_b) * math.cos(d_lam)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def compass_16(bearing_deg: float) -> str:
+    """0–360° 方位角 → 16 方位罗盘文字（N/NNE/NE/ENE/E/…/NNW）。
+
+    22.5° 奇数倍的分界归入顺时针方向的下一方位（如 11.25° → NNE）。
+    """
+    index = int(((bearing_deg % 360.0) + 11.25) // 22.5) % 16
+    return _COMPASS_16[index]
 
 
 def spherical_mean(lat: pd.Series, lon: pd.Series) -> tuple[float, float]:
