@@ -216,7 +216,7 @@ function renderChart(rows) {
           if (member == null || !linesByMember.has(member)) return;
           const focused = value === true || (value != null && value.focus === true);
           if (focused) {
-            hoverMember = member; // 记录当前聚焦成员（hover 自动聚焦或持久选中）
+            if (state.selectedMember !== member) hoverMember = member; // 持久选中的程序聚焦不算 hover
             showMemberHighlight(member);
             readout.textContent = `聚焦 成员 ${member}`;
           } else {
@@ -272,6 +272,7 @@ function showMemberHighlight(member) {
   const entry = linesByMember.get(member);
   if (!entry || entry.shown) return;
   forecastLayer.addLayer(entry.highlight);
+  entry.highlight._path?.setAttribute('data-highlight', member); // E2E/调试锚点
   entry.shown = true;
 }
 
@@ -288,11 +289,11 @@ function setMemberSelection(member) {
   const target = member != null && linesByMember.has(member) ? member : null;
   const previous = state.selectedMember;
   if (target === previous) return;
+  state.selectedMember = target; // 先更新状态：hide 的 guard 据此放行旧选中光晕的移除
   if (previous != null) {
     hideMemberHighlight(previous); // guard：若正被 hover，光晕交由 mouseout 收
     if (previous !== hoverMember) focusChartSeries(previous, false);
   }
-  state.selectedMember = target;
   if (target != null) {
     showMemberHighlight(target);
     focusChartSeries(target, true);
@@ -346,6 +347,7 @@ function render() {
           color: memberColor(colorIndex), weight: 9, opacity: 0.35, interactive: false,
         });
         linesByMember.set(memberKey, { line, highlight, shown: false });
+        line._path?.setAttribute('data-member', memberKey); // E2E/调试锚点
         line.on('mouseover', () => {
           hoverMember = memberKey;
           showMemberHighlight(memberKey);
