@@ -20,6 +20,7 @@ const state = {
   datasets: [], fcId: null, obsId: null,
   storm: null, init: null, member: 'ALL', leadCut: null,
   fcRows: [], obsRows: [], leadSteps: [],
+  selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -55,6 +56,7 @@ async function api(path, params) {
 /* ---------- 地图 ---------- */
 
 const map = L.map('map', { worldCopyJump: true }).setView([22, 132], 4);
+map.on('click', () => setMemberSelection(null)); // 点击空白（底图/观测层/点位冒泡）取消持久选中
 L.tileLayer(window.TILE_CONFIG.urlTemplate, {
   attribution: window.TILE_CONFIG.attribution,
   maxZoom: 20, maxNativeZoom: window.TILE_CONFIG.maxZoom,
@@ -103,10 +105,11 @@ function sortedUnique(rows, field, numeric = false) {
 /* ---------- 强度曲线（M4 uPlot，与地图同源数据/同配色，双向联动） ---------- */
 
 const markersByKey = new Map(); // `${member}#${lead_h}` -> circleMarker（单成员模式点级联动）
-const linesByMember = new Map(); // member -> polyline（全部成员模式成员级联动）
+const linesByMember = new Map(); // member -> { line, highlight, shown }
 let chart = null;
 let chartMembers = [];
 let lastHighlight = null;
+let hoverMember = null; // 当前 hover 聚焦的成员（临时高亮，与持久选中相互独立）
 
 const fmt = (v) => (v == null ? '—' : v);
 
@@ -210,21 +213,38 @@ function renderChart(rows) {
         },
         setSeries: (u, i, value) => {
           const member = chartMembers[i - 1];
-          if (member == null) return;
-          if (!linesByMember.has(member)) return;
+          if (member == null || !linesByMember.has(member)) return;
           const focused = value === true || (value != null && value.focus === true);
           if (focused) {
+            hoverMember = member; // 记录当前聚焦成员（hover 自动聚焦或持久选中）
             showMemberHighlight(member);
             readout.textContent = `聚焦 成员 ${member}`;
           } else {
-            hideMemberHighlight(member);
+            if (hoverMember === member) hoverMember = null;
+            hideMemberHighlight(member); // 选中态时保留（guard）
+            if (state.selectedMember === member) {
+              focusChartSeries(member, true); // 恢复被图表 prox blur 误关的选中聚焦
+            }
           }
+        },
+        ready: (u) => {
+          // 图表侧发起选中：点击时若有 hover 聚焦成员，则选中/切换/取消
+          u.over.addEventListener('click', () => {
+            if (hoverMember != null) {
+              setMemberSelection(state.selectedMember === hoverMember ? null : hoverMember);
+            }
+          });
         },
       },
     },
     data,
     $('chart'),
   );
+  // 重建后恢复持久选中的曲线聚焦（触发 setSeries hook，光晕幂等）
+  if (state.selectedMember != null) {
+    const idx = chartMembers.indexOf(state.selectedMember);
+    if (idx >= 0) chart.setSeries(idx + 1, { focus: true });
+  }
 }
 
 function highlightMarker(lead) {
@@ -246,7 +266,8 @@ function focusChartSeries(member, on) {
   if (idx >= 0) chart.setSeries(idx + 1, { focus: on });
 }
 
-/* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼 */
+/* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼；
+ * 选中成员或正被 hover 的成员光晕常显（hide 内建 guard） */
 function showMemberHighlight(member) {
   const entry = linesByMember.get(member);
   if (!entry || entry.shown) return;
@@ -255,10 +276,36 @@ function showMemberHighlight(member) {
 }
 
 function hideMemberHighlight(member) {
+  if (member === state.selectedMember || member === hoverMember) return;
   const entry = linesByMember.get(member);
   if (!entry || !entry.shown) return;
   forecastLayer.removeLayer(entry.highlight);
   entry.shown = false;
+}
+
+/* 持久选中：光晕常显 + 曲线聚焦保持；点线选中/再点同线取消（toggle）/点空白取消 */
+function setMemberSelection(member) {
+  const target = member != null && linesByMember.has(member) ? member : null;
+  const previous = state.selectedMember;
+  if (target === previous) return;
+  if (previous != null) {
+    hideMemberHighlight(previous); // guard：若正被 hover，光晕交由 mouseout 收
+    if (previous !== hoverMember) focusChartSeries(previous, false);
+  }
+  state.selectedMember = target;
+  if (target != null) {
+    showMemberHighlight(target);
+    focusChartSeries(target, true);
+  }
+  updateStatusBar();
+}
+
+function updateStatusBar() {
+  const selectedInfo = state.selectedMember != null
+    ? `；已选中: 成员 ${state.selectedMember}（再点该线或点空白取消）`
+    : '';
+  setStatus(`预报 ${state.lastRowsCount} 行 / 成员 ${state.lastGroupCount} 组` +
+    (state.obsId ? `；观测叠加 ${state.obsRows.length} 行` : '') + selectedInfo);
 }
 
 /* ---------- 渲染 ---------- */
@@ -294,18 +341,24 @@ function render() {
         opacity: 0.85,
       }).addTo(forecastLayer);
       if (!singleMember) {
-        // 高亮光晕层：同色、加宽、低透明度、不可交互；默认隐藏，hover/聚焦时叠加
+        // 高亮光晕层：同色、加宽、低透明度、不可交互；默认隐藏，hover/持久选中时叠加
         const highlight = L.polyline(coords, {
           color: memberColor(colorIndex), weight: 9, opacity: 0.35, interactive: false,
         });
         linesByMember.set(memberKey, { line, highlight, shown: false });
         line.on('mouseover', () => {
+          hoverMember = memberKey;
           showMemberHighlight(memberKey);
           focusChartSeries(memberKey, true);
         });
         line.on('mouseout', () => {
-          hideMemberHighlight(memberKey);
-          focusChartSeries(memberKey, false);
+          if (hoverMember === memberKey) hoverMember = null;
+          hideMemberHighlight(memberKey); // 选中态时保留（guard）
+          if (memberKey !== state.selectedMember) focusChartSeries(memberKey, false);
+        });
+        line.on('click', (e) => {
+          L.DomEvent.stopPropagation(e); // 阻止冒泡到 map click（空白取消）
+          setMemberSelection(state.selectedMember === memberKey ? null : memberKey);
         });
       }
     }
@@ -348,9 +401,15 @@ function render() {
   if (bounds.length) {
     map.fitBounds(L.latLngBounds(bounds).pad(0.08));
   }
-  setStatus(`预报 ${rows.length} 行 / 成员 ${groups.size} 组` +
-    (state.obsId ? `；观测叠加 ${state.obsRows.length} 行` : ''));
-  renderChart(rows);
+  state.lastRowsCount = rows.length;
+  state.lastGroupCount = groups.size;
+  // 恢复持久选中：成员仍在当前数据中才保留，否则清除
+  if (state.selectedMember != null && !linesByMember.has(state.selectedMember)) {
+    state.selectedMember = null;
+  }
+  if (state.selectedMember != null) showMemberHighlight(state.selectedMember);
+  updateStatusBar();
+  renderChart(rows); // 重建后由其内部恢复选中成员的曲线聚焦
 }
 
 /* ---------- 控件联动 ---------- */
@@ -500,7 +559,11 @@ $('fc-dataset').addEventListener('change', async () => {
 });
 $('storm').addEventListener('change', async () => { await onStormChange(); await onObsChange(); });
 $('init').addEventListener('change', () => { state.init = $('init').value || null; render(); });
-$('member').addEventListener('change', () => { state.member = $('member').value || 'ALL'; render(); });
+$('member').addEventListener('change', () => {
+  state.member = $('member').value || 'ALL';
+  state.selectedMember = null; // 切换成员视图模式时清除持久选中
+  render();
+});
 $('lead').addEventListener('input', () => {
   const idx = Number($('lead').value);
   state.leadCut = state.leadSteps.length ? state.leadSteps[idx] : null;
