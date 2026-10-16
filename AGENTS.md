@@ -71,7 +71,7 @@
   - `typhoon_track/service/`：编排层（datasets：uploads 目录存储+LRU 解析缓存；queries：筛选与行级载荷、经度双约定）；
   - `typhoon_track/api/`：FastAPI 路由与应用工厂（`uvicorn typhoon_track.api.app:app`）；CSV 双导入入口 `kind=forecast|observation`；接口输入输出契约由 `api/schemas.py` 的 pydantic 模型定义（DatasetMeta / TrackFilters / TrackPoint / TracksResponse，同步进入 OpenAPI 文档）；
   - `typhoon_track/web/`：地图工作台（templates + static：原生 ES Module JS、Leaflet 1.9.4 与 uPlot 1.6.32 本地 vendor、观测叠加、时效滑块、强度曲线双向联动[M3/M4]）；
-  - 根目录 `config.toml`：瓦片配置（url_template/attribution/max_zoom），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属 M5+；
+  - 根目录 `config.toml`：瓦片配置（url_template/attribution/max_zoom），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属候补功能池（见 `docs/里程碑基线.md`）；
   - `typhoon_track/cli.py` + `__main__.py`：重组 CLI 入口（`python -m typhoon_track`），与 `demo_src/wnc_csv_demo.py` 行为逐字节一致（`tests/test_cli_parity.py` 参数矩阵 × 数据集矩阵对照）；
   - `tests/`：正式测试目录（core 单测 + service/api 集成 + CLI 行为一致性对照，pytest）；
   - 端到端验收记录留存于根目录（如 `M2服务与上传验收记录_20261015.md`）。
@@ -117,7 +117,7 @@
 - [x] 前端技术选型：轻方案（无构建链）——FastAPI + Jinja2 + 原生 ES Module JS + Leaflet（本地 vendor，不经 npm）；前后端分离但单体服务，本机单人使用
 - [x] 后端框架选型：FastAPI + uvicorn；包名 `typhoon_track`，分层契约 `api → service → core`（`.importlinter` 随 M1 落地）；CSV 双导入入口 `kind=forecast|observation`
 - [x] 页面导入 CSV 的上传存储策略：`uploads/<数据集id>/original.csv + meta.json`（含 kind），无数据库，按需重解析 + 进程内 LRU 缓存（`.gitignore` 已预留 `uploads/`）
-- [x] 瓦片：默认 AWS 瓦片源；URL 由根目录 `config.toml` 配置项提供（M3 落地），不硬编码；多瓦片源切换归入 M5+
+- [x] 瓦片：默认 AWS 瓦片源；URL 由根目录 `config.toml` 配置项提供（M3 落地），不硬编码；多瓦片源切换归入候补功能池（`docs/里程碑基线.md`）
 - [x] 依赖声明文件形式：已采用 `requirements.txt`（运行时）+ `requirements-dev.txt`（开发）
 - [x] ruff / pyright / pytest / deptry 配置落地（`ruff.toml`、`pyrightconfig.json`、`pytest.ini`、`pyproject.toml`；`.importlinter` 待包结构）
 - [x] 正式包结构与测试目录（M1/M1b 已落地，登记于 §5）
