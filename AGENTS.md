@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 测试基线（pytest，`testpaths = tests demo_src`，共 194 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）、WNV3 配对真实数据交叉验证（缺文件自动跳过，含 M6 影响概率抽核）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 200 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）、WNV3 配对真实数据交叉验证（缺文件自动跳过，含 M6 影响概率抽核）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py
@@ -70,7 +70,7 @@
   - `typhoon_track/core/`：解析核心（aliases / io / normalize / selection / summary / geo / ensemble / impact），纯函数、无打印，错误文案与演示脚本保持一致以支撑对照验证；`core/ensemble.py` 为集合概率统计（逐时次均值/球面均值位置/概率半径/强度分布，口径见 `docs/M5口径验证记录_20261016.md`）；`core/impact.py` 为影响概率与最近接近（风圈象限判定/三级成员命中/mean 口径最近接近，缺风圈列显式拒绝不回退，口径见 `docs/里程碑基线.md` M6）；
   - `typhoon_track/service/`：编排层（datasets：uploads 目录存储+LRU 解析缓存；queries：筛选与行级载荷、经度双约定；places：根目录 `places/places.csv` 热读取预存地点，坏行跳过+warnings）；
   - `typhoon_track/api/`：FastAPI 路由与应用工厂（`uvicorn typhoon_track.api.app:app`）；CSV 双导入入口 `kind=forecast|observation`；轨迹查询与集合统计聚合端点（`ensemble-stats`，仅限预报、拒绝跨气旋/起报混合）；影响统计端点（`impact-stats`，仅限预报、缺风圈列显式 400 不回退、返回三级命中概率与 mean 口径最近接近）与预存地点端点（`GET /api/places`，热读取）；接口输入输出契约由 `api/schemas.py` 的 pydantic 模型定义（DatasetMeta / TrackFilters / TrackPoint / TracksResponse / EnsembleLeadStats / EnsembleStatsResponse / ImpactThresholdStats / ClosestApproach / ImpactStatsResponse / Place / PlacesResponse，同步进入 OpenAPI 文档）；页面注入瓦片配置与统计配置（分级/堆叠次序/p 档/低分母阈值，单源 core.ensemble）；
-  - `typhoon_track/web/`：三栏地图工作台（左导入/图例—中地图—右可滚动图表栏；templates + static：原生 ES Module JS、Leaflet 1.9.4 与 uPlot 1.6.32 本地 vendor、观测叠加、时效滑块、强度曲线双向联动[M3/M4]、自算均值叠加/强度分布堆叠/概率半径曲线与地图 p 圆[M5]）；
+  - `typhoon_track/web/`：三栏地图工作台（左导入/图例—中地图—右可滚动图表栏；templates + static：原生 ES Module JS、Leaflet 1.9.4 与 uPlot 1.6.32 本地 vendor、观测叠加、时效滑块、强度曲线双向联动[M3/M4]、自算均值叠加/强度分布堆叠/概率半径曲线与地图 p 圆[M5]、目标地点选点（预存/坐标/点选）与影响概率卡片及参考圆[M6]）；
   - 根目录 `config.toml`：瓦片配置（url_template/attribution/max_zoom），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属候补功能池（见 `docs/里程碑基线.md`）；
   - `typhoon_track/cli.py` + `__main__.py`：重组 CLI 入口（`python -m typhoon_track`），与 `demo_src/wnc_csv_demo.py` 行为逐字节一致（`tests/test_cli_parity.py` 参数矩阵 × 数据集矩阵对照）；
   - `tests/`：正式测试目录（core 单测 + service/api 集成 + CLI 行为一致性对照 + Playwright UI E2E，pytest）；

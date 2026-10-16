@@ -12,12 +12,14 @@ body { display: flex; font-family: system-ui, "Segoe UI", sans-serif; color: #22
 #panel section { margin-bottom: .2rem; }
 
 label { display: block; font-size: .78rem; color: #555; margin: .55rem 0 .15rem; }
-select, button, input[type="file"] {
+select, button, input[type="file"], input[type="text"] {
   width: 100%; box-sizing: border-box; padding: .3rem .35rem;
   font-size: .85rem; margin-top: .1rem;
 }
 button { background: #2563eb; color: #fff; border: 0; border-radius: 4px; padding: .45rem; cursor: pointer; margin-top: .5rem; }
 button:hover { background: #1d4ed8; }
+button.secondary { background: #64748b; }
+button.secondary:hover { background: #475569; }
 input[type="range"] { width: 100%; margin-top: .3rem; }
 
 /* 中栏：地图独占剩余宽度 */
@@ -89,3 +91,29 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 
 #legend .item { display: flex; align-items: center; font-size: .78rem; margin: .15rem 0; }
 #legend .chip { width: 14px; height: 14px; border-radius: 3px; margin-right: .45rem; border: 1px solid rgba(0,0,0,.25); }
+
+/* M6 目标地点：预存地点提示 / 地图点选光标 / 目标标记 */
+#place-warnings { font-size: .72rem; color: #8a6d1a; margin-top: .3rem; }
+#place-warnings:empty { display: none; }
+#map.pick { cursor: crosshair; }
+.target-pin { width: 0 !important; height: 0 !important; }
+.target-dot-tag {
+  display: inline-block; transform: translate(-50%, -50%);
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #0f766e; border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, .45), 0 1px 4px rgba(0, 0, 0, .5);
+  cursor: pointer;
+}
+
+/* M6 影响概率卡片（右栏，高度自适应内容） */
+#impact-wrap { height: auto; min-height: 150px; max-height: 360px; overflow-y: auto; }
+#impact-wrap .impact-body { position: static; padding: 10px 14px; font-size: .85rem; }
+.impact-body h3 { font-size: .85rem; margin: .4rem 0 .3rem; }
+.impact-row {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: .18rem 0; border-bottom: 1px dashed #eee;
+}
+.impact-row:last-child { border-bottom: 0; }
+.impact-value { font-weight: 600; white-space: nowrap; }
+.muted-inline { font-weight: 400; font-size: .72rem; color: #667; margin-left: 4px; }
+.impact-error { color: #b91c1c; font-size: .8rem; margin: .4rem 0; }

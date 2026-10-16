@@ -1,6 +1,7 @@
-/* WNC 台风轨迹工作台（M3/M4 功能 + M5d 概率特征；三栏布局：左导入与图例 — 中地图 — 右可滚动图表栏）：
+/* WNC 台风轨迹工作台（M3/M4 功能 + M5d 概率特征 + M6 影响概率；三栏布局：左导入与图例 — 中地图 — 右可滚动图表栏）：
  * 数据流：数据集选择 -> 拉取轨迹行 -> 客户端筛选（起报/成员/时效）-> Leaflet 渲染；
- *        (storm, init) 确定后拉取 ensemble-stats -> 均值轨迹/概率半径圆/统计图表。
+ *        (storm, init) 确定后拉取 ensemble-stats -> 均值轨迹/概率半径圆/统计图表；
+ *        目标地点（预存/坐标/地图点选）确定后拉取 impact-stats -> 三级影响概率 + 最近接近。
  * 数据纪律：时效档位取实际存在的 lead_h，不插值；缺失保持缺失；不跨起报时次混合；
  *          集合统计口径见 window.STATS_CONFIG（单一事实来源 core.ensemble）。*/
 
@@ -28,6 +29,7 @@ const state = {
   fcRows: [], obsRows: [], leadSteps: [],
   selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
   stats: null, pSelected: '100', pApplied: '100', selectedKeyLead: null,
+  target: null, places: null, impact: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -63,7 +65,14 @@ async function api(path, params) {
 /* ---------- 地图 ---------- */
 
 const map = L.map('map', { worldCopyJump: true }).setView([22, 132], 4);
-map.on('click', () => { // 点击空白（底图/观测层/点位冒泡）取消持久选中（成员与关键标签）
+let pickMode = false; // M6 地图点选模式：下一次地图点击作为目标地点（优先于空白取消选中）
+map.on('click', (e) => {
+  if (pickMode) {
+    setTarget(e.latlng.lat, toSignedLon(e.latlng.lng), '地图点选');
+    setPickMode(false);
+    return;
+  }
+  // 点击空白（底图/观测层/点位冒泡）取消持久选中（成员与关键标签）
   setMemberSelection(null);
   if (state.selectedKeyLead != null) setSelectedKeyLead(null);
 });
@@ -81,6 +90,7 @@ statsCircleRenderer.on('add', () => {
   statsCircleRenderer._container.style.pointerEvents = 'none';
 });
 const statsLayer = L.layerGroup().addTo(map);
+const targetLayer = L.layerGroup().addTo(map); // M6 目标地点标记与参考圆（最上层）
 // 引线标签的像素偏移依赖当前 zoom：视图变化后仅重算锚点坐标（updateStatsAnchors），
 // 不重建图层（规避 zoom 动画窗口内矢量层增删与渲染器异步更新的竞态）
 let statsAnchorRetimer = null;
@@ -793,7 +803,7 @@ function updateStatsAnchors() {
 
 async function loadStats() {
   state.stats = null;
-  if (!state.fcId || !state.storm || !state.init) { render(); return; }
+  if (!state.fcId || !state.storm || !state.init) { render(); await loadImpact(); return; }
   try {
     state.stats = await api(`/api/datasets/${state.fcId}/ensemble-stats`, {
       storm: state.storm, init: state.init,
@@ -803,6 +813,138 @@ async function loadStats() {
     setStatus(`集合统计获取失败：${err.message}`, true);
   }
   render();
+  await loadImpact(); // (storm, init) 变化后目标地点影响统计同步刷新
+}
+
+/* ---------- 目标地点与影响概率（M6）：预存地点/坐标输入/地图点选 + 三级概率与最近接近 ---------- */
+
+const TARGET_REFERENCE_RADII = [100, 200, 400, 800]; // 参考圆半径 km（仅视觉参考，不参与判定）
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
+}
+
+function targetLabel() {
+  const t = state.target;
+  if (!t) return '';
+  const coords = `${t.lat.toFixed(4)}, ${t.lon.toFixed(4)}`;
+  return t.label ? `${t.label}（${coords}）` : coords;
+}
+
+function renderTargetLayer() {
+  targetLayer.clearLayers();
+  $('map').removeAttribute('data-target-circles');
+  if (!state.target) return;
+  const center = [state.target.lat, state.target.lon];
+  const marker = L.marker(center, {
+    icon: L.divIcon({ className: 'target-pin', html: '<span class="target-dot-tag"></span>', iconSize: null }),
+    keyboard: false,
+  }).addTo(targetLayer);
+  marker.getElement()?.setAttribute('data-target-marker', `${state.target.lat.toFixed(4)},${state.target.lon.toFixed(4)}`);
+  marker.bindPopup([
+    `<b>目标地点：${escapeHtml(state.target.label ?? '临时坐标')}</b>`,
+    `坐标: ${state.target.lat.toFixed(4)}, ${state.target.lon.toFixed(4)}`,
+    `参考圆: ${TARGET_REFERENCE_RADII.join('/')} km（仅视觉参考，不参与判定）`,
+  ].join('<br>'));
+  for (let i = TARGET_REFERENCE_RADII.length - 1; i >= 0; i -= 1) {
+    // 大圆先画小圆后画（Canvas 后画在上层）；与概率圆同渲染器，不拦截下层交互
+    L.polygon(geoCirclePoints(center, TARGET_REFERENCE_RADII[i]), {
+      color: '#0f766e', weight: 1.1, opacity: 0.55, fill: false,
+      dashArray: '4 6', interactive: false, smoothFactor: 0, noClip: true,
+      renderer: statsCircleRenderer,
+    }).addTo(targetLayer);
+  }
+  $('map').setAttribute('data-target-circles', TARGET_REFERENCE_RADII.join(','));
+}
+
+function setTarget(lat, lon, label) {
+  // 经度已在 [-180,180] 内时原值保留（toSignedLon 的模运算会引入浮点尾差）
+  const lonValue = lon >= -180 && lon <= 180 ? lon : toSignedLon(lon);
+  state.target = { lat, lon: lonValue, label: label ?? null };
+  $('target-lat').value = String(state.target.lat);
+  $('target-lon').value = String(state.target.lon);
+  renderTargetLayer();
+  setStatus(`目标地点：${targetLabel()}`);
+  void loadImpact();
+}
+
+function clearTarget() {
+  state.target = null;
+  state.impact = null;
+  $('target-lat').value = '';
+  $('target-lon').value = '';
+  $('place-select').value = '';
+  targetLayer.clearLayers();
+  $('map').removeAttribute('data-target-circles');
+  renderImpactCard();
+}
+
+function setPickMode(on) {
+  pickMode = on;
+  $('map').classList.toggle('pick', on);
+  if (on) $('map').setAttribute('data-pick-mode', '1');
+  else $('map').removeAttribute('data-pick-mode');
+  $('target-pick').textContent = on ? '点选中…（点击地图）' : '地图点选';
+}
+
+async function loadImpact() {
+  state.impact = null;
+  if (!state.target || !state.fcId || !state.storm || !state.init) { renderImpactCard(); return; }
+  try {
+    state.impact = await api(`/api/datasets/${state.fcId}/impact-stats`, {
+      lat: state.target.lat, lon: state.target.lon, storm: state.storm, init: state.init,
+    });
+  } catch (err) {
+    state.impact = { error: err.message }; // 如缺风圈列：显式展示不可用原因，不回退
+  }
+  renderImpactCard();
+}
+
+function renderImpactCard() {
+  const wrap = $('impact-wrap');
+  const body = $('impact-body');
+  if (!state.target) { wrap.classList.add('hidden'); body.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  if (!state.impact) { body.innerHTML = '<p class="muted">影响统计计算中…</p>'; return; }
+  if (state.impact.error) {
+    wrap.removeAttribute('data-impact-total');
+    body.innerHTML = `<p class="impact-error">${escapeHtml(state.impact.error)}</p>`;
+    return;
+  }
+  const data = state.impact;
+  const rows = data.thresholds.map((t) => {
+    const pct = t.fraction == null ? '—' : `${(t.fraction * 100).toFixed(1)}%`;
+    return `<div class="impact-row"><span>${escapeHtml(t.label)}</span>` +
+      `<span class="impact-value">${pct}<span class="muted-inline">${t.hit_members}/${t.total_members} 成员</span></span></div>`;
+  }).join('');
+  const c = data.closest;
+  const when = c && c.valid ? `（${c.valid.replace('T', ' ').slice(0, 16)}Z）` : '';
+  const closestHtml = c
+    ? '<h3>最近接近（mean 口径）</h3>' +
+      `<div class="impact-row"><span>时效</span><span>${c.lead_h} h${when}</span></div>` +
+      `<div class="impact-row"><span>距离</span><span>${Math.round(c.distance_km)} km</span></div>` +
+      `<div class="impact-row"><span>气旋方位</span><span>${escapeHtml(c.compass)}（${c.bearing_deg.toFixed(1)}°）</span></div>` +
+      `<div class="impact-row"><span>强度（自算均值）</span><span>风 ${c.mean_wind == null ? '—' : c.mean_wind.toFixed(0)} kt / 压 ${c.mean_pressure == null ? '—' : c.mean_pressure.toFixed(0)} hPa</span></div>`
+    : '<p class="muted">无有效均值位置，最近接近不可用</p>';
+  body.innerHTML = `<h3>目标：${escapeHtml(targetLabel())}</h3>` + rows + closestHtml;
+  wrap.setAttribute('data-impact-total', String(data.thresholds[0]?.total_members ?? ''));
+}
+
+async function loadPlaces() {
+  try {
+    state.places = await api('/api/places');
+  } catch (err) {
+    state.places = { available: false, places: [], warnings: [`预存地点获取失败：${err.message}`] };
+  }
+  const list = state.places?.places ?? [];
+  const options = [{
+    value: '',
+    label: list.length ? '— 选择预存地点 —' : '— 无预存地点（填坐标或地图点选）—',
+  }].concat(list.map((p) => ({ value: p.name, label: p.note ? `${p.name}（${p.note}）` : p.name })));
+  fillSelect($('place-select'), options, false);
+  $('place-warnings').textContent = (state.places?.warnings ?? []).join('\n');
 }
 
 /* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼；
@@ -1115,6 +1257,32 @@ $('lead').addEventListener('input', () => {
 });
 $('obs-dataset').addEventListener('change', onObsChange);
 
+/* M6 目标地点：预存地点下拉 / 坐标应用（Enter 同效）/ 地图点选开关 / 清除 */
+$('place-select').addEventListener('change', () => {
+  const name = $('place-select').value;
+  if (!name) return;
+  const place = (state.places?.places ?? []).find((p) => p.name === name);
+  if (place) setTarget(place.lat, place.lon, place.name);
+});
+function applyTargetInputs() {
+  const lat = Number.parseFloat($('target-lat').value.trim());
+  const lon = Number.parseFloat($('target-lon').value.trim());
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    setStatus('目标坐标无效：需 lat∈[-90,90]、lon∈[-180,180]（十进制度）', true);
+    return;
+  }
+  setTarget(lat, lon, null);
+}
+$('target-apply').addEventListener('click', applyTargetInputs);
+for (const id of ['target-lat', 'target-lon']) {
+  $(id).addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') applyTargetInputs();
+  });
+}
+$('target-pick').addEventListener('click', () => setPickMode(!pickMode));
+$('target-clear').addEventListener('click', () => { setPickMode(false); clearTarget(); });
+
 /* p 下拉 + 应用按钮：切换 p 仅暂存，点击"应用"才重绘（半径/圆/读数） */
 (function initPSelect() {
   const select = $('p-select');
@@ -1149,6 +1317,7 @@ $('p-apply').addEventListener('click', () => {
 })();
 
 (async function init() {
+  void loadPlaces(); // 预存地点独立加载（失败仅提示，不阻塞工作台）
   try {
     state.datasets = (await api('/api/datasets')).datasets;
   } catch (err) {

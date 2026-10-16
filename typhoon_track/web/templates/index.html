@@ -52,6 +52,20 @@
   </section>
 
   <section>
+    <h2>目标地点</h2>
+    <label for="place-select">预存地点</label>
+    <select id="place-select"></select>
+    <p id="place-warnings" class="muted"></p>
+    <label for="target-lat">纬度（-90 – 90，十进制度）</label>
+    <input type="text" id="target-lat" inputmode="decimal" placeholder="如 19.05" autocomplete="off">
+    <label for="target-lon">经度（-180 – 180，十进制度）</label>
+    <input type="text" id="target-lon" inputmode="decimal" placeholder="如 -104.32" autocomplete="off">
+    <button id="target-apply" type="button">应用坐标</button>
+    <button id="target-pick" type="button" class="secondary">地图点选</button>
+    <button id="target-clear" type="button" class="secondary">清除目标</button>
+  </section>
+
+  <section>
     <h2>强度图例（kt，1 分钟平均，按数据提供口径；灰=已消散）</h2>
     <div id="legend"></div>
   </section>
@@ -77,6 +91,9 @@
   <div class="chart-card hidden" id="radius-wrap" data-stats-card>
     <div class="chart-body" id="radius-chart"></div>
     <div class="readout" id="radius-readout"></div>
+  </div>
+  <div class="chart-card hidden" id="impact-wrap">
+    <div class="impact-body" id="impact-body"></div>
   </div>
 </aside>
 

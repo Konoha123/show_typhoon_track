@@ -2,7 +2,9 @@
 
 覆盖成员线持久选中状态机：点线选中、鼠标离开保持、点空白取消、点其它线切换；
 M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆叠层级次序、
-低分母虚线、单成员模式隐藏统计卡。
+低分母虚线、单成员模式隐藏统计卡；
+M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
+（含缺风圈列的显式不可用提示）。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -40,6 +42,29 @@ LOW_DENOM_CSV = (
     "LOW001,01,2026-07-01T00:00:00Z,2026-07-03T00:00:00Z,48,20.8,127.0,70,972\n"
 )
 
+_RADIUS_COLS = ",".join(
+    f"radius_{speed}_knot_winds_{quad}_km"
+    for speed in (34, 50, 64)
+    for quad in ("ne", "se", "sw", "nw")
+)
+
+# M6：2 成员 × 2 时效，含风圈列（成员 01 lead 0 的 NE 象限可命中构造点 17.8,132.4）
+IMPACT_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,"
+    f"{_RADIUS_COLS}\n"
+    "SYN202601,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000,"
+    "100,0,0,0,60,0,0,0,30,0,0,0\n"
+    "SYN202601,01,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.5,132.5,34,999,"
+    "80,0,0,0,50,0,0,0,0,0,0,0\n"
+    "SYN202601,02,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.0,131.5,30,1002,"
+    "0,0,0,0,0,0,0,0,0,0,0,0\n"
+    "SYN202601,02,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.0,132.0,31,1001,"
+    "0,0,0,0,0,0,0,0,0,0,0,0\n"
+)
+
+PLACES_CSV = "name,lat,lon,note\n那霸,26.2124,127.6809,冲绳\n"
+
 
 def _free_port() -> int:
     with socket.socket() as probe:
@@ -57,10 +82,23 @@ def live_url_low(tmp_path: Path) -> Iterator[str]:
     yield from _start_server(tmp_path, LOW_DENOM_CSV.encode())
 
 
-def _start_server(tmp_path: Path, csv: bytes) -> Iterator[str]:
+@pytest.fixture
+def live_url_impact(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(tmp_path, IMPACT_CSV.encode(), places_csv=PLACES_CSV.encode())
+
+
+def _start_server(tmp_path: Path, csv: bytes, places_csv: bytes | None = None) -> Iterator[str]:
     store = DatasetStore(tmp_path)
     store.create(filename="ens.csv", content=csv, kind="forecast")
-    config = Config(create_app(store), host="127.0.0.1", port=_free_port(), log_level="warning")
+    places_path = None
+    if places_csv is not None:
+        places_path = tmp_path / "places" / "places.csv"
+        places_path.parent.mkdir(parents=True, exist_ok=True)
+        places_path.write_bytes(places_csv)
+    config = Config(
+        create_app(store, places_path=places_path),
+        host="127.0.0.1", port=_free_port(), log_level="warning",
+    )
     server = Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -321,3 +359,89 @@ def test_mean_line_stays_visible_when_member_hovered(page, live_url: str) -> Non
     page.wait_for_timeout(300)
     after = mean_dark_cols()
     assert after > 5
+
+
+# ---------- M6 目标地点与影响概率 ----------
+
+
+def _set_target_by_inputs(page, live_url: str, lat: str = "17.8", lon: str = "132.4") -> None:
+    page.goto(live_url)
+    page.wait_for_selector("#storm option", state="attached")
+    page.fill("#target-lat", lat)
+    page.fill("#target-lon", lon)
+    page.click("#target-apply")
+
+
+def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impact: str) -> None:
+    _set_target_by_inputs(page, live_url_impact)
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    assert page.locator("#map").get_attribute("data-target-circles") == "100,200,400,800"
+    page.wait_for_selector("#impact-wrap:not(.hidden)")
+    text = page.locator("#impact-body").inner_text()
+    # 成员 01 lead 0 NE 象限 ~52km：烈风/暴风 1/2，飓风 0/2；最近接近 lead 24（NNW）
+    assert "烈风（≥34 kt）" in text and "50.0%" in text and "1/2 成员" in text
+    assert "飓风（≥64 kt）" in text and "0.0%" in text and "0/2 成员" in text
+    assert "最近接近（mean 口径）" in text and "24 h" in text and "NNW" in text
+    assert page.locator("#impact-wrap").get_attribute("data-impact-total") == "2"
+
+
+def test_target_clear_removes_layers_and_card(page, live_url_impact: str) -> None:
+    _set_target_by_inputs(page, live_url_impact)
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    page.click("#target-clear")
+    page.wait_for_timeout(300)
+    assert page.locator("[data-target-marker]").count() == 0
+    assert page.locator("#map").get_attribute("data-target-circles") is None
+    assert page.locator("#target-lat").input_value() == ""
+    assert "hidden" in (page.locator("#impact-wrap").get_attribute("class") or "")
+
+
+def test_places_dropdown_selects_target(page, live_url_impact: str) -> None:
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.select_option("#place-select", "那霸")
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    assert page.locator("#target-lat").input_value() == "26.2124"
+    assert page.locator("#target-lon").input_value() == "127.6809"
+    page.wait_for_selector("#impact-wrap:not(.hidden)")
+    text = page.locator("#impact-body").inner_text()
+    assert "那霸" in text  # 目标行显示预存地名
+    assert text.count("0.0%") == 3  # 远离气旋：三级概率均为 0
+
+
+def test_invalid_target_coordinates_rejected(page, live_url_impact: str) -> None:
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.fill("#target-lat", "120")
+    page.fill("#target-lon", "132")
+    page.click("#target-apply")
+    page.wait_for_timeout(300)
+    assert page.locator("[data-target-marker]").count() == 0
+    assert "目标坐标无效" in page.locator("#status").inner_text()
+
+
+def test_pick_mode_map_click_sets_target(page, live_url_impact: str) -> None:
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_timeout(500)  # 等 fitBounds 稳定后先缩小视图，确保点击处为空白海域
+    page.click(".leaflet-control-zoom-out")
+    page.click(".leaflet-control-zoom-out")
+    page.wait_for_timeout(400)
+    page.click("#target-pick")
+    assert page.locator("#map").get_attribute("data-pick-mode") == "1"
+    page.locator("#map").click(position={"x": 60, "y": 320})
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    assert page.locator("#map").get_attribute("data-pick-mode") is None
+    assert page.locator("#target-pick").inner_text() == "地图点选"
+
+
+def test_impact_card_shows_missing_radius_error(page, live_url: str) -> None:
+    # MEMBERS 样本无风圈列：显式展示不可用原因，不提供距离回退
+    page.goto(live_url)
+    page.wait_for_selector("#storm option", state="attached")
+    page.fill("#target-lat", "17.5")
+    page.fill("#target-lon", "132.0")
+    page.click("#target-apply")
+    page.wait_for_selector("#impact-wrap:not(.hidden)")
+    text = page.locator("#impact-body").inner_text()
+    assert "缺少风圈字段" in text and "不提供距离回退" in text
