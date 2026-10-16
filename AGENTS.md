@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 测试基线（pytest，`testpaths = tests demo_src`，共 120 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 141 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）、WNV3 配对真实数据交叉验证（缺文件自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py
@@ -67,7 +67,7 @@
 
 - 正式包结构（M1/M1b/M2 已落地）：
   - 包名 `typhoon_track`，分层契约 `cli/api → service → core`（`.importlinter` 强制）；
-  - `typhoon_track/core/`：解析核心（aliases / io / normalize / selection / summary / geo），纯函数、无打印，错误文案与演示脚本保持一致以支撑对照验证；
+  - `typhoon_track/core/`：解析核心（aliases / io / normalize / selection / summary / geo / ensemble），纯函数、无打印，错误文案与演示脚本保持一致以支撑对照验证；`core/ensemble.py` 为集合概率统计（逐时次均值/球面均值位置/概率半径/强度分布，口径见 `docs/M5口径验证记录_20261016.md`）；
   - `typhoon_track/service/`：编排层（datasets：uploads 目录存储+LRU 解析缓存；queries：筛选与行级载荷、经度双约定）；
   - `typhoon_track/api/`：FastAPI 路由与应用工厂（`uvicorn typhoon_track.api.app:app`）；CSV 双导入入口 `kind=forecast|observation`；接口输入输出契约由 `api/schemas.py` 的 pydantic 模型定义（DatasetMeta / TrackFilters / TrackPoint / TracksResponse，同步进入 OpenAPI 文档）；
   - `typhoon_track/web/`：地图工作台（templates + static：原生 ES Module JS、Leaflet 1.9.4 与 uPlot 1.6.32 本地 vendor、观测叠加、时效滑块、强度曲线双向联动[M3/M4]）；
@@ -88,7 +88,7 @@
   ruff check --no-fix <源码目录或文件列表>   # L1
   pyright <源码目录或文件列表>               # L2
   python -m pip check && deptry . && lint-imports   # L3
-  python -m pytest -q                        # L5（基线 120 项，UI E2E 未装自动跳过）
+  python -m pytest -q                        # L5（基线 141 项，UI E2E 未装自动跳过）
   ```
 
 - 最低要求：L0 编译检查 + 现有测试全量回跑。
