@@ -105,6 +105,17 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
   cursor: pointer;
 }
 
+/* M7a 参考圆分级配色图例（环样式，色值与地图参考圆同源） */
+#target-circle-legend {
+  display: flex; flex-wrap: wrap; gap: .2rem .7rem;
+  margin-top: .55rem; font-size: .75rem; color: #333;
+}
+#target-circle-legend .item { display: inline-flex; align-items: center; }
+#target-circle-legend .ring {
+  display: inline-block; width: 12px; height: 12px; box-sizing: border-box;
+  border-radius: 50%; border: 2.5px solid; margin-right: .3rem;
+}
+
 /* M6 影响概率卡片（右栏，高度自适应内容） */
 #impact-wrap { height: auto; min-height: 150px; max-height: 360px; overflow-y: auto; }
 #impact-wrap .impact-body { position: static; padding: 10px 14px; font-size: .85rem; }

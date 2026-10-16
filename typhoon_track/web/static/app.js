@@ -819,6 +819,9 @@ async function loadStats() {
 /* ---------- 目标地点与影响概率（M6）：预存地点/坐标输入/地图点选 + 三级概率与最近接近 ---------- */
 
 const TARGET_REFERENCE_RADII = [100, 200, 400, 800]; // 参考圆半径 km（仅视觉参考，不参与判定）
+// M7a 分级配色：每圈一色（玫红/橙/金/紫，已避让强度色阶、成员色与概率圆蓝），
+// 实线 2px/0.9 不透明，明暗瓦片下均易辨认；色值与左栏图例同源
+const TARGET_REFERENCE_CIRCLE_COLORS = { 100: '#db2777', 200: '#ea580c', 400: '#ca8a04', 800: '#6d28d9' };
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => ({
@@ -849,10 +852,11 @@ function renderTargetLayer() {
     `参考圆: ${TARGET_REFERENCE_RADII.join('/')} km（仅视觉参考，不参与判定）`,
   ].join('<br>'));
   for (let i = TARGET_REFERENCE_RADII.length - 1; i >= 0; i -= 1) {
+    const radius = TARGET_REFERENCE_RADII[i];
     // 大圆先画小圆后画（Canvas 后画在上层）；与概率圆同渲染器，不拦截下层交互
-    L.polygon(geoCirclePoints(center, TARGET_REFERENCE_RADII[i]), {
-      color: '#0f766e', weight: 1.1, opacity: 0.55, fill: false,
-      dashArray: '4 6', interactive: false, smoothFactor: 0, noClip: true,
+    L.polygon(geoCirclePoints(center, radius), {
+      color: TARGET_REFERENCE_CIRCLE_COLORS[radius], weight: 2, opacity: 0.9,
+      fill: false, interactive: false, smoothFactor: 0, noClip: true,
       renderer: statsCircleRenderer,
     }).addTo(targetLayer);
   }
@@ -1312,6 +1316,21 @@ $('p-apply').addEventListener('click', () => {
     chip.style.background = stop.color;
     item.appendChild(chip);
     item.appendChild(document.createTextNode(stop.label));
+    box.appendChild(item);
+  }
+})();
+
+/* M7a 参考圆图例：环样式色值与地图参考圆同源（TARGET_REFERENCE_CIRCLE_COLORS），不另立口径 */
+(function initTargetCircleLegend() {
+  const box = $('target-circle-legend');
+  for (const radius of TARGET_REFERENCE_RADII) {
+    const item = document.createElement('span');
+    item.className = 'item';
+    const ring = document.createElement('span');
+    ring.className = 'ring';
+    ring.style.borderColor = TARGET_REFERENCE_CIRCLE_COLORS[radius];
+    item.appendChild(ring);
+    item.appendChild(document.createTextNode(`${radius} km`));
     box.appendChild(item);
   }
 })();

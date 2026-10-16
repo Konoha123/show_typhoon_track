@@ -4,7 +4,8 @@
 M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆叠层级次序、
 低分母虚线、单成员模式隐藏统计卡；
 M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
-（含缺风圈列的显式不可用提示）。
+（含缺风圈列的显式不可用提示）；
+M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -376,6 +377,9 @@ def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impac
     _set_target_by_inputs(page, live_url_impact)
     page.wait_for_selector("[data-target-marker]", state="attached")
     assert page.locator("#map").get_attribute("data-target-circles") == "100,200,400,800"
+    legend = page.locator("#target-circle-legend .item")
+    assert legend.count() == 4
+    assert legend.all_inner_texts() == ["100 km", "200 km", "400 km", "800 km"]
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
     # 成员 01 lead 0 NE 象限 ~52km：烈风/暴风 1/2，飓风 0/2；最近接近 lead 24（NNW）
@@ -383,6 +387,60 @@ def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impac
     assert "飓风（≥64 kt）" in text and "0.0%" in text and "0/2 成员" in text
     assert "最近接近（mean 口径）" in text and "24 h" in text and "NNW" in text
     assert page.locator("#impact-wrap").get_attribute("data-impact-total") == "2"
+
+
+def test_target_reference_circles_colored_and_visible(page, live_url_impact: str) -> None:
+    # M7a：四圈分级配色（玫红/橙/金/紫）真实绘制在 Canvas 上（像素级可见性抽检）；
+    # 色距阈值 1500 已与强度色阶（如 H4 红 #d62828）、成员色、概率圆蓝相互分离
+    _set_target_by_inputs(page, live_url_impact)
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    # 视图默认贴合轨迹范围：逐级缩小直至最大参考圆（800 km，紫色）进入视口
+    violet_probe = """
+      () => {
+        let n = 0;
+        for (const canvas of document.querySelectorAll('#map canvas')) {
+          const ctx = canvas.getContext('2d');
+          if (!ctx || !canvas.width || !canvas.height) continue;
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          for (let y = 0; y < canvas.height; y += 2) {
+            for (let x = 0; x < canvas.width; x += 2) {
+              const i = (y * canvas.width + x) * 4;
+              if (img[i + 3] < 150) continue;
+              if ((img[i]-109)**2 + (img[i+1]-40)**2 + (img[i+2]-217)**2 < 1500) n++;
+            }
+          }
+        }
+        return n;
+      }"""
+    for _ in range(10):
+        if page.evaluate(violet_probe) > 3:
+            break
+        page.click(".leaflet-control-zoom-out")
+        page.wait_for_timeout(400)
+    page.wait_for_timeout(400)  # 等 zoom 动画与 Canvas 重绘稳定
+    counts = page.evaluate("""
+      () => {
+        const targets = [[219,39,119],[234,88,12],[202,138,4],[109,40,217]];
+        const counts = new Array(targets.length).fill(0);
+        for (const canvas of document.querySelectorAll('#map canvas')) {
+          const ctx = canvas.getContext('2d');
+          if (!ctx || !canvas.width || !canvas.height) continue;
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          for (let y = 0; y < canvas.height; y += 2) {
+            for (let x = 0; x < canvas.width; x += 2) {
+              const i = (y * canvas.width + x) * 4;
+              if (img[i + 3] < 150) continue;
+              for (let k = 0; k < targets.length; k++) {
+                const [r, g, b] = targets[k];
+                const d = (img[i]-r)**2 + (img[i+1]-g)**2 + (img[i+2]-b)**2;
+                if (d < 1500) { counts[k] += 1; break; }
+              }
+            }
+          }
+        }
+        return counts;
+      }""")
+    assert all(c > 3 for c in counts), counts
 
 
 def test_target_clear_removes_layers_and_card(page, live_url_impact: str) -> None:
