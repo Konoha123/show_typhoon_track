@@ -583,20 +583,28 @@ function renderRadiusChart() {
     data,
     $('radius-chart'),
   );
-  $('radius-wrap').setAttribute('data-p', p);
+}
+
+/* M7c：位置概率半径图表暂隐藏（使用反馈：实用性不足，后端 radius_km 与地图 p 圆不受影响）。
+ * data-p / data-low-count 锚点与图表渲染解耦后继续维护（p 应用语义与低分母事实的回归锚点）；
+ * 恢复展示时在 renderStatsCharts 重新调用 renderRadiusChart() 即可 */
+function updateRadiusCardAnchors() {
+  const lowCount = state.stats.leads.filter((l) => l.low_denominator).length;
+  $('radius-wrap').setAttribute('data-p', state.pApplied);
   $('radius-wrap').setAttribute('data-low-count', String(lowCount));
 }
 
 function renderStatsCharts() {
   destroyStatsCharts();
   const show = statsVisible();
-  for (const id of ['pressure-wrap', 'stack-wrap', 'radius-wrap']) {
+  for (const id of ['pressure-wrap', 'stack-wrap']) {
     $(id).classList.toggle('hidden', !show);
   }
+  $('radius-wrap').classList.add('hidden'); // M7c：保持隐藏
   if (!show) return;
   renderPressureChart();
   renderStackChart();
-  renderRadiusChart();
+  updateRadiusCardAnchors();
 }
 
 function statsPopupText(lead, entry) {
@@ -1343,7 +1351,7 @@ $('target-clear').addEventListener('click', () => { setPickMode(false); clearTar
 $('p-select').addEventListener('change', () => { state.pSelected = $('p-select').value; });
 $('p-apply').addEventListener('click', () => {
   state.pApplied = state.pSelected;
-  render(); // 地图圆 + 半径曲线 + 弹窗读数统一按已应用的 p 重绘
+  render(); // 地图圆 + 弹窗读数 + 解耦锚点统一按已应用的 p 重绘（M7c：半径图暂隐藏）
 });
 
 (function initLegend() {
@@ -1393,13 +1401,13 @@ $('p-apply').addEventListener('click', () => {
 let chartResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(chartResizeTimer);
-  chartResizeTimer = setTimeout(() => {
+    chartResizeTimer = setTimeout(() => {
     renderChart(currentForecastRows());
     if (statsVisible()) {
       destroyStatsCharts();
       renderPressureChart();
       renderStackChart();
-      renderRadiusChart();
+      updateRadiusCardAnchors(); // M7c：半径图暂隐藏，仅刷新锚点
     }
   }, 150);
 });

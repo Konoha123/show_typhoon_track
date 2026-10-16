@@ -6,7 +6,8 @@ M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆
 M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
 （含缺风圈列的显式不可用提示）；
 M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
-M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用。
+M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用；
+M7c 位置概率半径图表暂隐藏：渲染停用但锚点与数据链路保留。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -170,8 +171,11 @@ def _open_stats(page, live_url: str) -> None:
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector('path[data-mean-track]')
     page.wait_for_selector("#map[data-current-circle]")
-    for chart_id in ("#radius-chart", "#stack-chart", "#pressure-chart"):
+    for chart_id in ("#stack-chart", "#pressure-chart"):
         page.wait_for_selector(f"{chart_id} canvas")
+    # M7c：位置概率半径图表暂隐藏（数据链路与 data-p/data-low-count 锚点保留）
+    assert "hidden" in (page.locator("#radius-wrap").get_attribute("class") or "")
+    assert page.locator("#radius-chart canvas").count() == 0
 
 
 def test_stats_charts_render_with_p_default_100(page, live_url: str) -> None:
@@ -216,8 +220,9 @@ def test_single_member_mode_hides_stats(page, live_url: str) -> None:
 def test_low_denominator_dashed_series(page, live_url_low: str) -> None:
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
-    page.wait_for_selector("#radius-chart canvas")
-    # LOW001 lead 48 仅 1/4 成员在场（25% < 30%）→ 低分母时次数 = 1（虚线序列启用）
+    page.wait_for_selector("#stack-chart canvas")
+    # LOW001 lead 48 仅 1/4 成员在场（25% < 30%）→ 低分母时次数 = 1（虚线序列启用；
+    # M7c 半径图隐藏后，低分母事实经解耦锚点 data-low-count 锁定）
     assert page.locator("#radius-wrap").get_attribute("data-low-count") == "1"
 
 
@@ -237,7 +242,7 @@ def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
     # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h，关键圆止于截断点（0/24）
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
-    page.wait_for_selector("#radius-chart canvas")
+    page.wait_for_selector("#stack-chart canvas")
     cut = page.locator('path[data-mean-cut]')
     assert cut.count() == 1
     assert cut.first.get_attribute("data-mean-cut") == "48"
