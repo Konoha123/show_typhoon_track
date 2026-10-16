@@ -242,11 +242,7 @@ function renderChart(rows) {
       return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
     }),
   );
-  // 均值线加白色描边底层：从密集的成员彩线中衬托出来（白底先画，深色主线后画覆盖）
-  if (meanWindByLead) {
-    const meanVals = leads.map((l) => meanWindByLead.get(l) ?? null);
-    data.push(meanVals.slice(), meanVals);
-  }
+  if (meanWindByLead) data.push(leads.map((l) => meanWindByLead.get(l) ?? null));
   const memberSeries = chartMembers.map((m, i) => ({
     label: `成员 ${m}`,
     stroke: memberColor(i),
@@ -254,18 +250,16 @@ function renderChart(rows) {
     points: { show: false },
     spanGaps: false,
   }));
+  // 均值线用虚线加粗：密集的成员彩线中实线难以分辨（R5 白描边方案视觉突兀已撤），虚线辨识度最高
   const meanSeries = meanWindByLead
-    ? [
-        { label: '均值（自算）', stroke: '#ffffff', width: 5, points: { show: false }, spanGaps: false },
-        { label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false },
-      ]
+    ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 4, dash: [10, 6], points: { show: false }, spanGaps: false }]
     : [];
-  const meanDataIndex = 1 + chartMembers.length + 1; // 均值主线在 data 中的索引（白描边后一位）
+  const meanDataIndex = 1 + chartMembers.length; // 均值在 data 中的索引
   let tipUpdate = null;
   chart = new uPlot(
     {
       width, height,
-      title: '成员风速曲线（白描边深色线 = 自算均值）',
+      title: '成员风速曲线（虚线 = 自算均值）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       focus: { alpha: 0.12 },
@@ -403,18 +397,14 @@ function renderPressureChart() {
       return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
     }),
   );
-  // 均值线加白色描边底层（与风速图同法）
-  if (meanPressure) {
-    const meanVals = leads.map((l) => meanPressure.get(l) ?? null);
-    data.push(meanVals.slice(), meanVals);
-  }
-  const meanDataIndex = 1 + members.length + 1; // 均值主线在 data 中的索引（白描边后一位）
+  if (meanPressure) data.push(leads.map((l) => meanPressure.get(l) ?? null));
+  const meanDataIndex = 1 + members.length; // 均值在 data 中的索引
   const readout = $('pressure-readout');
   let tipUpdate = null;
   pressureChart = new uPlot(
     {
       width, height,
-      title: '成员气压曲线（白描边深色线 = 自算均值）',
+      title: '成员气压曲线（虚线 = 自算均值）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       scales: { x: { time: false }, y: {} },
@@ -428,10 +418,7 @@ function renderPressureChart() {
           spanGaps: false,
         })),
         meanPressure
-          ? [
-              { label: '均值（自算）', stroke: '#ffffff', width: 5, points: { show: false }, spanGaps: false },
-              { label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false },
-            ]
+          ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 4, dash: [10, 6], points: { show: false }, spanGaps: false }]
           : [],
       ),
       hooks: {
