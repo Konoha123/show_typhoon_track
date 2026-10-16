@@ -211,11 +211,14 @@ function renderChart(rows) {
         setSeries: (u, i, value) => {
           const member = chartMembers[i - 1];
           if (member == null) return;
-          const line = linesByMember.get(member);
-          if (!line) return;
+          if (!linesByMember.has(member)) return;
           const focused = value === true || (value != null && value.focus === true);
-          line.setStyle(focused ? { weight: 4, opacity: 1 } : { weight: 1.4, opacity: 0.85 });
-          if (focused) readout.textContent = `聚焦 成员 ${member}`;
+          if (focused) {
+            showMemberHighlight(member);
+            readout.textContent = `聚焦 成员 ${member}`;
+          } else {
+            hideMemberHighlight(member);
+          }
         },
       },
     },
@@ -241,6 +244,21 @@ function focusChartSeries(member, on) {
   if (!chart || state.member !== 'ALL') return;
   const idx = chartMembers.indexOf(member);
   if (idx >= 0) chart.setSeries(idx + 1, { focus: on });
+}
+
+/* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼 */
+function showMemberHighlight(member) {
+  const entry = linesByMember.get(member);
+  if (!entry || entry.shown) return;
+  forecastLayer.addLayer(entry.highlight);
+  entry.shown = true;
+}
+
+function hideMemberHighlight(member) {
+  const entry = linesByMember.get(member);
+  if (!entry || !entry.shown) return;
+  forecastLayer.removeLayer(entry.highlight);
+  entry.shown = false;
 }
 
 /* ---------- 渲染 ---------- */
@@ -276,13 +294,17 @@ function render() {
         opacity: 0.85,
       }).addTo(forecastLayer);
       if (!singleMember) {
-        linesByMember.set(memberKey, line);
+        // 高亮光晕层：同色、加宽、低透明度、不可交互；默认隐藏，hover/聚焦时叠加
+        const highlight = L.polyline(coords, {
+          color: memberColor(colorIndex), weight: 9, opacity: 0.35, interactive: false,
+        });
+        linesByMember.set(memberKey, { line, highlight, shown: false });
         line.on('mouseover', () => {
-          line.setStyle({ weight: 4, opacity: 1 });
+          showMemberHighlight(memberKey);
           focusChartSeries(memberKey, true);
         });
         line.on('mouseout', () => {
-          line.setStyle({ weight: 1.4, opacity: 0.85 });
+          hideMemberHighlight(memberKey);
           focusChartSeries(memberKey, false);
         });
       }
