@@ -286,3 +286,38 @@ def test_chart_titles_concise(page, live_url: str) -> None:
     assert "配色与地图一致" not in joined
     assert "自底向上" not in joined
     assert "成员，" not in joined
+
+
+def test_mean_line_stays_visible_when_member_hovered(page, live_url: str) -> None:
+    # 复现用户场景：hover 地图成员线触发 focus 淡出时，风速图均值线必须保持可见
+    #（修复前 focus.alpha=0.12 作用于全部非聚焦 series，均值线被淡化到不可见）
+    _open_stats(page, live_url)
+
+    def mean_dark_cols() -> int:
+        return page.evaluate("""() => {
+          const c = document.querySelector('#chart canvas');
+          if (!c) return -1;
+          const ctx = c.getContext('2d');
+          const W = c.width, H = c.height;
+          const img = ctx.getImageData(0, 0, W, H).data;
+          let cols = 0;
+          for (let x = 40; x < W - 40; x += 8) {
+            for (let y = 20; y < H - 20; y++) {
+              const i = (y * W + x) * 4;
+              if (img[i+3] > 200 && img[i] < 45 && img[i+1] < 50 && img[i+2] < 75) { cols++; break; }
+            }
+          }
+          return cols;
+        }""")
+
+    before = mean_dark_cols()
+    assert before > 5, "初始应可见均值线"
+    _widen_line_for_click(page, "01")
+    page.hover('path[data-member="01"]')
+    page.wait_for_timeout(400)
+    during = mean_dark_cols()
+    assert during > 5, f"hover 成员时均值线被淡化（{before} -> {during}）"
+    page.mouse.move(30, 600)  # 移出地图
+    page.wait_for_timeout(300)
+    after = mean_dark_cols()
+    assert after > 5

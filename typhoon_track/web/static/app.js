@@ -74,8 +74,12 @@ L.tileLayer(window.TILE_CONFIG.urlTemplate, {
 const forecastLayer = L.layerGroup().addTo(map);
 const obsLayer = L.layerGroup().addTo(map);
 // 概率圆专用 Canvas renderer：SVG path 的 zoom 增量更新会丢失圆类几何（d="M0 0"），
-// Canvas 在视图变化时全量重绘，不受影响
+// Canvas 在视图变化时全量重绘，不受影响。圆均为 interactive:false，
+// 画布整体关闭指针事件以免拦截下层成员线的 hover/click
 const statsCircleRenderer = L.canvas({ padding: 0.5 });
+statsCircleRenderer.on('add', () => {
+  statsCircleRenderer._container.style.pointerEvents = 'none';
+});
 const statsLayer = L.layerGroup().addTo(map);
 // 引线标签的像素偏移依赖当前 zoom：视图变化后仅重算锚点坐标（updateStatsAnchors），
 // 不重建图层（规避 zoom 动画窗口内矢量层增删与渲染器异步更新的竞态）
@@ -262,7 +266,6 @@ function renderChart(rows) {
       title: '成员风速曲线（深色线 = 自算均值）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
-      focus: { alpha: 0.12 },
       scales: { x: { time: false }, y: {} },
       axes: baseAxes.concat([{ label: '风速 (kt)' }]),
       series: [{}].concat(memberSeries, meanSeries),
@@ -306,11 +309,6 @@ function renderChart(rows) {
     $('chart'),
   );
   tipUpdate = makeCursorTip(chart);
-  // 重建后恢复持久选中的曲线聚焦（触发 setSeries hook，光晕幂等）
-  if (state.selectedMember != null) {
-    const idx = chartMembers.indexOf(state.selectedMember);
-    if (idx >= 0) chart.setSeries(idx + 1, { focus: true });
-  }
 }
 
 function highlightMarker(lead) {
@@ -327,9 +325,9 @@ function pointToChart(lead) {
 }
 
 function focusChartSeries(member, on) {
-  if (!chart || state.member !== 'ALL') return;
-  const idx = chartMembers.indexOf(member);
-  if (idx >= 0) chart.setSeries(idx + 1, { focus: on });
+  // 已停用（M5d-R10）：uPlot 的 setSeries({focus}) 在未配置 focus.alpha 时仍会内部淡出
+  // 其余 series（曾致 hover 成员时均值线"消失"、被聚焦成员显得像被加粗）。风速图行为
+  // 与气压图对齐（无 focus 淡出）；地图↔成员线的 hover/选中高亮由各自事件直接驱动，不受影响。
 }
 
 /* ---------- 集合概率特征（M5d）：均值/分布/半径图表 + 地图均值轨迹与 p 圆 ---------- */
