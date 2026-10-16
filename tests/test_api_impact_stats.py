@@ -80,8 +80,13 @@ def test_impact_stats_thresholds_and_closest(client: TestClient) -> None:
     assert by_key[34]["fraction"] == pytest.approx(0.5)
     assert by_key[50]["hit_members"] == 1
     assert by_key[64]["hit_members"] == 0
-    assert by_key[34]["label"] == "烈风（≥34 kt）"
-    assert by_key[64]["label"] == "飓风（≥64 kt）"
+    assert by_key[34]["label"] == "烈风（风速≥34 kt）"
+    assert by_key[64]["label"] == "飓风（风速≥64 kt）"
+    # M7d：核心强风区（距离≤RMW）；IMPACT_CSV 无 rmw 列 → 全不命中但留在分母
+    core = body["core_wind"]
+    assert core["label"] == "核心强风区（距离≤RMW）"
+    assert core["hit_members"] == 0 and core["total_members"] == 2
+    assert core["fraction"] == pytest.approx(0.0)
     closest = body["closest"]
     assert closest is not None
     # lead 24 均值位置 (≈18.25, 132.25) 距点 ~52.6 km，近于 lead 0 的 ~92 km
@@ -97,11 +102,14 @@ def test_impact_stats_thresholds_and_closest(client: TestClient) -> None:
 def test_impact_stats_openapi_contract(client: TestClient) -> None:
     document = client.get("/openapi.json").json()
     schemas = document["components"]["schemas"]
-    for name in ("ImpactThresholdStats", "ClosestApproach", "ImpactStatsResponse"):
+    for name in ("ImpactThresholdStats", "CoreWindStats", "ClosestApproach", "ImpactStatsResponse"):
         assert name in schemas, f"OpenAPI 缺少契约模型: {name}"
     closest_properties = schemas["ClosestApproach"]["properties"]
     for field in ("distance_km", "bearing_deg", "compass", "mean_wind", "mean_pressure"):
         assert field in closest_properties
+    core_properties = schemas["CoreWindStats"]["properties"]
+    for field in ("label", "hit_members", "total_members", "fraction"):
+        assert field in core_properties
 
 
 def test_impact_stats_unknown_dataset_404(client: TestClient) -> None:
@@ -154,6 +162,11 @@ def test_impact_stats_real_wnv3_spot_check(client: TestClient) -> None:
     assert by_key[34]["fraction"] == pytest.approx(47 / 64)
     assert by_key[50]["hit_members"] == 7
     assert by_key[64]["hit_members"] == 1
+    # M7d 核心强风区锁定值：独立 pandas 复算（裸 CSV + 自写 haversine）得 2/64；
+    # 真实文件 rmw 无缺失、39 行 ≤0（ATCF 惯例 0.0=无核心区），均按不命中留在分母
+    core = body["core_wind"]
+    assert core["hit_members"] == 2 and core["total_members"] == 64
+    assert core["fraction"] == pytest.approx(2 / 64)
     closest = body["closest"]
     assert closest["lead_h"] == 54.0
     assert closest["distance_km"] == pytest.approx(140.09, abs=0.05)

@@ -962,11 +962,14 @@ function renderImpactCard() {
     return;
   }
   const data = state.impact;
-  const rows = data.thresholds.map((t) => {
-    const pct = t.fraction == null ? '—' : `${(t.fraction * 100).toFixed(1)}%`;
-    return `<div class="impact-row"><span>${escapeHtml(t.label)}</span>` +
-      `<span class="impact-value">${pct}<span class="muted-inline">${t.hit_members}/${t.total_members} 成员</span></span></div>`;
-  }).join('');
+  const impactRow = (label, fraction, hit, total) => {
+    const pct = fraction == null ? '—' : `${(fraction * 100).toFixed(1)}%`;
+    return `<div class="impact-row"><span>${escapeHtml(label)}</span>` +
+      `<span class="impact-value">${pct}<span class="muted-inline">${hit}/${total} 成员</span></span></div>`;
+  };
+  const rows = data.thresholds.map((t) => impactRow(t.label, t.fraction, t.hit_members, t.total_members)).join('') +
+    // M7d：核心强风区（距中心 ≤ RMW 全向圆；rmw 缺失的时次不命中，留在分母）
+    (data.core_wind ? impactRow(data.core_wind.label, data.core_wind.fraction, data.core_wind.hit_members, data.core_wind.total_members) : '');
   const c = data.closest;
   const when = c && c.valid ? `（${c.valid.replace('T', ' ').slice(0, 16)}Z）` : '';
   const closestHtml = c

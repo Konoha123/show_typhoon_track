@@ -1,4 +1,4 @@
-"""core.impact 与 core.geo 方位扩展：象限判定/三级影响概率/最近接近测试。
+"""core.impact 与 core.geo 方位扩展：象限判定/三级影响概率/最近接近/核心强风区（M7d）测试。
 
 含 WNV3 真实数据抽核（文件缺失自动跳过）：
 - 远点三级概率全 0；
@@ -24,6 +24,7 @@ from typhoon_track.core import (
     initial_bearing_deg,
     make_mapping,
     normalize,
+    point_in_core_wind,
     point_in_wind_field,
     quadrant_of_bearing,
     read_csv,
@@ -144,6 +145,45 @@ def test_point_in_wind_field_radius_semantics() -> None:
     assert point_in_wind_field(10.3, 130.3, 10.0, 130.0, {"ne": 0.0}) is False  # 0.0=该级风不存在
     assert point_in_wind_field(10.3, 130.3, 10.0, 130.0, {"ne": None}) is False  # 缺失不命中
     assert point_in_wind_field(10.3, 130.3, 10.0, 130.0, {}) is False  # 象限键缺失视同无半径
+
+
+# ---------- M7d：核心强风区（距离 ≤ RMW，全向圆无象限） ----------
+
+
+def test_point_in_core_wind_radius_semantics() -> None:
+    distance = haversine_km(10.0, 130.0, 10.3, 130.3)  # ~46.8 km
+    assert point_in_core_wind(10.3, 130.3, 10.0, 130.0, 60.0) is True
+    assert point_in_core_wind(10.3, 130.3, 10.0, 130.0, distance) is True  # 含等号（同风圈口径）
+    assert point_in_core_wind(10.3, 130.3, 10.0, 130.0, distance - 1e-6) is False
+    # RMW 缺失 / 0 / 负值：该时次不命中（0.0=无核心区数据，不臆造）
+    for rmw in (None, 0.0, -5.0):
+        assert point_in_core_wind(10.3, 130.3, 10.0, 130.0, rmw) is False
+
+
+def test_impact_profile_core_wind_member_hit_counts_once() -> None:
+    # 成员 0 lead0 RMW=60 覆盖点（~46.8 km 命中）；lead24 中心远离不命中（仍只计一次）；
+    # 成员 1 RMW 缺失 → 不命中但留在分母
+    frame = make_frame(
+        [
+            {"member": "0", "rmw": 60.0},
+            {"member": "0", "lead_h": 24.0, "lat": 15.0, "lon": 135.0, "rmw": 60.0},
+            {"member": "1", "rmw": float("nan")},
+        ]
+    )
+    core = impact_profile(frame, lat=10.3, lon=130.3).core_wind
+    assert core.hit_members == 1
+    assert core.total_members == 2
+    assert core.fraction == pytest.approx(0.5)
+
+
+def test_impact_profile_core_wind_column_absent_all_miss() -> None:
+    # rmw 列整列缺失：不做运行时列探测（M7 规划已核实真实导出与合成样本均含该列），按全不命中
+    core = impact_profile(
+        make_frame([{"member": "0"}, {"member": "1"}]), lat=10.3, lon=130.3
+    ).core_wind
+    assert core.hit_members == 0
+    assert core.total_members == 2
+    assert core.fraction == pytest.approx(0.0)
 
 
 # ---------- impact：impact_profile ----------

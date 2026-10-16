@@ -30,9 +30,11 @@ from .geo import (
 from .impact import (
     WIND_THRESHOLDS,
     ClosestApproach,
+    CoreWindImpact,
     ImpactProfile,
     ThresholdImpact,
     impact_profile,
+    point_in_core_wind,
     point_in_wind_field,
     quadrant_of_bearing,
 )
@@ -51,6 +53,7 @@ __all__ = [
     "ALIASES",
     "CATEGORY_STACK_BOTTOM_UP",
     "ClosestApproach",
+    "CoreWindImpact",
     "DEFAULT_P_VALUES",
     "DatasetSummary",
     "DISSIPATED_COLOR",
@@ -76,6 +79,7 @@ __all__ = [
     "initial_bearing_deg",
     "make_mapping",
     "normalize",
+    "point_in_core_wind",
     "point_in_wind_field",
     "quadrant_of_bearing",
     "read_csv",

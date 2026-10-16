@@ -110,6 +110,11 @@ def impact_stats(
             }
             for stat in profile.thresholds
         ],
+        "core_wind": {
+            "hit_members": profile.core_wind.hit_members,
+            "total_members": profile.core_wind.total_members,
+            "fraction": profile.core_wind.fraction,
+        },
         "closest": closest,
     }
 

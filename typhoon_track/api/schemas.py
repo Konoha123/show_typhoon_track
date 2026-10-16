@@ -154,16 +154,26 @@ class EnsembleStatsResponse(BaseModel):
 
 
 IMPACT_THRESHOLD_LABELS: dict[int, str] = {
-    34: "烈风（≥34 kt）",
-    50: "暴风（≥50 kt）",
-    64: "飓风（≥64 kt）",
+    34: "烈风（风速≥34 kt）",
+    50: "暴风（风速≥50 kt）",
+    64: "飓风（风速≥64 kt）",
 }
+CORE_WIND_LABEL = "核心强风区（距离≤RMW）"
 
 
 class ImpactThresholdStats(BaseModel):
-    """单一风速阈值的目标地点影响统计（口径见 core.impact 与 M6 基线）。"""
+    """单一风速阈值的目标地点影响统计（口径见 core.impact 与 M6/M7 基线）。"""
 
     threshold_kt: int
+    label: str
+    hit_members: int
+    total_members: int
+    fraction: float | None  # total_members 为 0 时为 null
+
+
+class CoreWindStats(BaseModel):
+    """核心强风区（距气旋中心 ≤ RMW）的目标地点影响统计（M7d；口径见 core.impact）。"""
+
     label: str
     hit_members: int
     total_members: int
@@ -185,7 +195,8 @@ class ClosestApproach(BaseModel):
 
 
 class ImpactStatsResponse(BaseModel):
-    """影响统计响应；thresholds 固定 34/50/64 kt 三级，closest 无有效位置时为 null。"""
+    """影响统计响应；thresholds 固定 34/50/64 kt 三级 + core_wind 核心强风区（M7d），
+    closest 无有效位置时为 null。"""
 
     dataset_id: str
     kind: Kind
@@ -194,4 +205,5 @@ class ImpactStatsResponse(BaseModel):
     lat: float
     lon: float
     thresholds: list[ImpactThresholdStats]
+    core_wind: CoreWindStats
     closest: ClosestApproach | None

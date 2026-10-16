@@ -15,7 +15,9 @@ from typhoon_track.service.places import load_places
 from typhoon_track.service.queries import ensemble_stats, impact_stats, track_rows
 
 from .schemas import (
+    CORE_WIND_LABEL,
     IMPACT_THRESHOLD_LABELS,
+    CoreWindStats,
     DatasetListResponse,
     DatasetMeta,
     EnsembleStatsResponse,
@@ -157,6 +159,7 @@ def register(app: FastAPI) -> None:
             )
             for stat in payload["thresholds"]
         ]
+        core = payload["core_wind"]
         return ImpactStatsResponse(
             dataset_id=dataset_id,
             kind=parsed.kind,
@@ -165,5 +168,6 @@ def register(app: FastAPI) -> None:
             lat=lat,
             lon=lon,
             thresholds=thresholds,
+            core_wind=CoreWindStats(label=CORE_WIND_LABEL, **core),
             closest=payload["closest"],
         )

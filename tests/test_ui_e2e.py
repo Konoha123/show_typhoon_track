@@ -388,9 +388,11 @@ def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impac
     assert legend.all_inner_texts() == ["100 km", "200 km", "400 km", "800 km"]
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
-    # 成员 01 lead 0 NE 象限 ~52km：烈风/暴风 1/2，飓风 0/2；最近接近 lead 24（NNW）
-    assert "烈风（≥34 kt）" in text and "50.0%" in text and "1/2 成员" in text
-    assert "飓风（≥64 kt）" in text and "0.0%" in text and "0/2 成员" in text
+    # 成员 01 lead 0 NE 象限 ~52km：烈风/暴风 1/2，飓风 0/2；最近接近 lead 24（NNW）；
+    # M7d 第四行核心强风区：IMPACT_CSV 无 rmw 列 → 0/2（不命中留在分母）
+    assert "烈风（风速≥34 kt）" in text and "50.0%" in text and "1/2 成员" in text
+    assert "飓风（风速≥64 kt）" in text and "0.0%" in text
+    assert "核心强风区（距离≤RMW）" in text
     assert "最近接近（mean 口径）" in text and "24 h" in text and "NNW" in text
     assert page.locator("#impact-wrap").get_attribute("data-impact-total") == "2"
 
@@ -470,7 +472,7 @@ def test_places_dropdown_selects_target(page, live_url_impact: str) -> None:
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
     assert "那霸" in text  # 目标行显示预存地名
-    assert text.count("0.0%") == 3  # 远离气旋：三级概率均为 0
+    assert text.count("0.0%") == 4  # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）
 
 
 def test_invalid_target_coordinates_rejected(page, live_url_impact: str) -> None:

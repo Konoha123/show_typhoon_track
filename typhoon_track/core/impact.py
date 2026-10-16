@@ -1,6 +1,6 @@
 """影响概率与最近接近（纯函数）。
 
-口径（M6 规划，已经用户确认）：
+口径（M6 规划，已经用户确认；M7d 扩充核心强风区）：
 - 判定：成员某时次使目标地点进入 x kt 风圈 ⟺ 地点相对气旋中心的方位落入某象限
   （NE∈[0°,90°)、SE∈[90°,180°)、SW∈[180°,270°)、NW∈[270°,360°)，按气旋中心→
   地点的大圆初始方位角），且 haversine 距离 ≤ 该象限 radius_{x}_knot_winds_{quad}_km；
@@ -8,6 +8,10 @@
   相邻象限（数据处理纪律第 5 条）；
 - 成员在任一实际存在时次命中 ≥34/≥50/≥64 kt → 计入该阈值分子；只取实际存在时次，
   不插值、不外推（纪律第 7 条）；不跨气旋/起报时次混合（纪律第 6 条）；
+- 核心强风区（M7d）：成员某时次使地点与气旋中心的 haversine 距离 ≤
+  radius_of_maximum_winds_km（RMW，全向圆、无象限）→ 计入分子；RMW 缺失或 ≤0 的
+  时次不命中（留在分母，缺失保持缺失）；真实导出与合成样本均含该列（M7 规划阶段
+  已核实），不做运行时列探测，rmw 列整列缺失同样按全不命中处理；
 - 分母 = 该 (storm, init) 下出现过的成员总数（与 M5 n_total 同口径）；
 - 缺少任一风圈字段即显式拒绝，不提供纯距离回退（用户确认）；
 - 最近接近采用 M5 自算逐时次均值位置（ensemble_profile，已 94/94 验证），
@@ -40,6 +44,15 @@ class ThresholdImpact:
 
 
 @dataclass(frozen=True)
+class CoreWindImpact:
+    """核心强风区（距中心 ≤ RMW）的成员命中统计（M7d）。"""
+
+    hit_members: int
+    total_members: int
+    fraction: float | None  # total_members 为 0 时为 None（缺失保持缺失，不臆造 0）
+
+
+@dataclass(frozen=True)
 class ClosestApproach:
     """mean 口径下目标地点对气旋的最近接近时次。"""
 
@@ -59,6 +72,7 @@ class ImpactProfile:
     """目标地点的影响统计总载荷。"""
 
     thresholds: tuple[ThresholdImpact, ...]
+    core_wind: CoreWindImpact
     closest: ClosestApproach | None
 
 
@@ -84,6 +98,23 @@ def point_in_wind_field(
     if radius is None or radius <= 0.0:
         return False
     return haversine_km(center_lat, center_lon, lat, lon) <= radius
+
+
+def point_in_core_wind(
+    lat: float,
+    lon: float,
+    center_lat: float,
+    center_lon: float,
+    rmw_km: float | None,
+) -> bool:
+    """判定目标地点是否进入某时次的核心强风区（M7d：距中心 ≤ RMW，全向圆无象限）。
+
+    RMW 缺失或 ≤0 视为该时次无核心区数据（不命中，留在分母）；距离恰等于 RMW 判为
+    命中（含等号，与风圈口径一致）。经度两套约定均可（三角函数按周期自洽）。
+    """
+    if rmw_km is None or rmw_km <= 0.0:
+        return False
+    return haversine_km(center_lat, center_lon, lat, lon) <= rmw_km
 
 
 def _to_float(value: object) -> float | None:
@@ -122,13 +153,15 @@ def impact_profile(
     member_keys = _member_keys(frame)
     total = len(set(member_keys))
     hits: dict[int, set[str]] = {threshold: set() for threshold in thresholds}
+    core_hits: set[str] = set()
     for record, member in zip(records, member_keys, strict=True):
-        if all(member in hits[threshold] for threshold in thresholds):
+        if member in core_hits and all(member in hits[threshold] for threshold in thresholds):
             continue
         center_lat = _to_float(record.get("lat"))
         center_lon = _to_float(record.get("lon"))
         if center_lat is None or center_lon is None:
             continue
+        rmw = _to_float(record.get("rmw"))
         for threshold in thresholds:
             if member in hits[threshold]:
                 continue
@@ -138,6 +171,8 @@ def impact_profile(
             }
             if point_in_wind_field(lat, lon, center_lat, center_lon, radii):
                 hits[threshold].add(member)
+        if member not in core_hits and point_in_core_wind(lat, lon, center_lat, center_lon, rmw):
+            core_hits.add(member)
 
     stats = tuple(
         ThresholdImpact(
@@ -148,7 +183,14 @@ def impact_profile(
         )
         for threshold in thresholds
     )
-    return ImpactProfile(thresholds=stats, closest=_closest_approach(frame, lat=lat, lon=lon))
+    core_wind = CoreWindImpact(
+        hit_members=len(core_hits),
+        total_members=total,
+        fraction=(len(core_hits) / total) if total else None,
+    )
+    return ImpactProfile(
+        thresholds=stats, core_wind=core_wind, closest=_closest_approach(frame, lat=lat, lon=lon)
+    )
 
 
 def _closest_approach(frame: pd.DataFrame, *, lat: float, lon: float) -> ClosestApproach | None:
