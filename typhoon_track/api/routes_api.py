@@ -1,4 +1,4 @@
-"""REST 路由：CSV 双入口上传（kind=forecast|observation）与轨迹查询。
+"""REST 路由：CSV 双入口上传（kind=forecast|observation）、轨迹查询与集合统计。
 
 输入输出结构由 .schemas 的 pydantic 契约定义，并同步进入 OpenAPI 文档。
 """
@@ -10,11 +10,12 @@ from typing import Annotated
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from typhoon_track.service.datasets import KINDS, DatasetStore
-from typhoon_track.service.queries import track_rows
+from typhoon_track.service.queries import ensemble_stats, track_rows
 
 from .schemas import (
     DatasetListResponse,
     DatasetMeta,
+    EnsembleStatsResponse,
     TrackFilters,
     TrackPoint,
     TracksResponse,
@@ -76,4 +77,28 @@ def register(app: FastAPI) -> None:
             filters=filters,
             count=len(points),
             rows=points,
+        )
+
+    @app.get(
+        "/api/datasets/{dataset_id}/ensemble-stats", response_model=EnsembleStatsResponse
+    )
+    def get_ensemble_stats(
+        dataset_id: str,
+        storm: Annotated[str | None, Query(description="气旋编号；多气旋数据集必须指定")] = None,
+        init: Annotated[str | None, Query(description="起报时次；多起报数据集必须指定")] = None,
+    ) -> EnsembleStatsResponse:
+        try:
+            parsed = _store().load(dataset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if parsed.kind != "forecast":
+            raise HTTPException(status_code=400, detail="集合统计仅适用于预报数据集（kind=forecast）")
+        try:
+            payload = ensemble_stats(parsed.frame, storm=storm, init=init)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return EnsembleStatsResponse(
+            dataset_id=dataset_id, kind=parsed.kind, **payload
         )

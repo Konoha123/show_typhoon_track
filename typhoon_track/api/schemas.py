@@ -106,3 +106,31 @@ class TracksResponse(BaseModel):
     filters: TrackFilters
     count: int
     rows: list[TrackPoint]
+
+
+class EnsembleLeadStats(BaseModel):
+    """单个预报时效的集合统计（口径见 core.ensemble；分母 n 逐时次暴露）。"""
+
+    lead_h: float
+    valid: str | None = None  # ISO 8601（UTC）
+    n_total: int
+    n_present: int
+    mean_wind: float | None = None
+    mean_pressure: float | None = None
+    mean_lat: float | None = None
+    mean_lon: float | None = None
+    radius_km: dict[int, float | None]  # p(%) -> km；位置缺失时为 null
+    category_counts: dict[str, int]  # 各强度等级 + DISSIPATED（+ UNKNOWN 若有）
+    low_denominator: bool
+
+
+class EnsembleStatsResponse(BaseModel):
+    """集合统计响应；一次返回全部 p 档，前端切换 p 无需重新请求。"""
+
+    dataset_id: str
+    kind: Kind
+    storm: str | None
+    init: str | None
+    p_values: list[int]
+    count: int
+    leads: list[EnsembleLeadStats]
