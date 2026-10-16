@@ -9,8 +9,8 @@
 ```
 show_typhoon_track/
 ├── typhoon_track/                     # 正式包（分层：cli/api → service → core）
-│   ├── core/                          # 解析核心（纯函数：aliases/io/normalize/selection/summary/geo）
-│   ├── service/                       # 编排层（数据集存储+LRU、轨迹查询载荷）
+│   ├── core/                          # 解析核心（纯函数：aliases/io/normalize/selection/summary/geo/ensemble/impact）
+│   ├── service/                       # 编排层（数据集存储+LRU、轨迹查询/集合与影响统计载荷、预存地点热读取）
 │   ├── api/                           # FastAPI 路由与应用工厂（uvicorn typhoon_track.api.app:app）
 │   ├── web/                           # M3 地图工作台（templates + static + Leaflet 本地 vendor）
 │   ├── cli.py                         # 重组 CLI 入口（python -m typhoon_track）
@@ -18,6 +18,7 @@ show_typhoon_track/
 ├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
 ├── docs/                              # 验收与确认记录（含 M2/M3 验收、瓦片数据源确认）
 ├── config.toml                        # 瓦片配置（url_template/attribution/max_zoom）
+├── places/                            # 预存地点（places.csv 用户维护、git 忽略；example 模板入库）
 ├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
 │   ├── test_wnc_csv_demo.py           # 9 项合成数据自检（无网络依赖）
@@ -87,9 +88,42 @@ python -m uvicorn typhoon_track.api.app:app --port 8000
 # 浏览器访问 http://127.0.0.1:8000 ：
 #   - 上传预报/观测 CSV（双入口）→ 选择气旋/起报/成员 → 地图渲染轨迹
 #   - 成员"全部"为意面图；单成员按强度着色点位；观测轨迹黑虚线叠加；时效滑块只取实际存在档位
+#   - 目标地点与影响概率的用法见下文「目标地点与影响概率使用说明」
 # 瓦片数据源在 config.toml 配置（确认记录见 docs/瓦片数据源确认_20261015.md）
 # REST 接口：POST /api/datasets（file+kind）、GET /api/datasets、GET /api/datasets/{id}(/tracks)
 ```
+
+## 目标地点与影响概率使用说明（M6）
+
+对任一目标地点，工作台会按当前选定的 (气旋, 起报时次) 计算三级风圈影响概率与 mean 口径最近接近：选定后地图打标记并绘制 100/200/400/800 km 参考圆（**纯视觉参考，不参与判定**），右栏「影响概率」卡片展示结果，并随气旋/起报时次/目标变化自动重算。
+
+### 预存地点的管理
+
+预存地点保存在项目根目录 `places/places.csv`，由使用者自行维护（该目录被 git 忽略，仅模板 `places/places.example.csv` 入库）：
+
+```bash
+cp places/places.example.csv places/places.csv   # 首次使用：从模板复制后用任意编辑器维护
+```
+
+- 列格式：`name,lat,lon,note`（`note` 可选；多余列忽略；`#` 开头注释行忽略；UTF-8 编码）；
+- 约束：`name` 唯一（重名以首现为准，其余跳过）；`lat`∈[-90,90]、`lon`∈[-180,180]，十进制度；
+- **热读取**：服务端每次请求现读该文件——编辑保存后**刷新页面（F5）即生效**，无需重启服务；
+- 坏行（坐标非数值/越界、空名、重名）逐行跳过，原因显示在左栏下拉下方，不影响其余行；
+- 文件缺失时自动降级为仅临时选点（不报错）；文件存在但缺必要列或为空会给出明确错误提示。
+
+### 页面选点方式（三者互斥）
+
+1. **预存地点下拉**：左栏「目标地点」卡片中选择，坐标回填到输入框并立即生效；
+2. **坐标输入**：在纬度/经度文本框输入十进制度，点击「应用坐标」或按 Enter（越界会提示且不生效）；
+3. **地图点选**：点击「地图点选」（光标变十字）→ 再点击地图任意位置即作为目标。
+
+点击「清除目标」撤销标记、参考圆与结果卡片。
+
+### 结果解读与适用前提
+
+- **三级影响概率**：烈风（≥34 kt）/ 暴风（≥50 kt）/ 飓风（≥64 kt）——成员在任一实际存在时次使该地点落入对应风圈象限半径内即计入分子（每成员只计一次），分母为该起报时次的成员总数；
+- **最近接近（mean 口径）**：离目标最近的集合平均位置时次，含时效与时刻、距离（km）、气旋位于目标的方位（16 方位文字 + 方位角）、该时次自算平均风速/气压；
+- 适用前提：预报数据集（kind=forecast）、已选定单一气旋与起报时次、CSV 含 34/50/64 kt 风圈四象限列；不满足时（如无风圈列的数据集）卡片显式给出不可用原因，**不做距离回退**。
 
 ## 数据说明
 
