@@ -141,6 +141,8 @@ def test_stats_charts_render_with_p_default_100(page, live_url: str) -> None:
     assert circle.get_attribute("data-p") == "100"
     assert circle.get_attribute("data-radius-km") is not None
     assert page.locator("#stack-wrap").get_attribute("data-n-total") == "2"
+    # 左栏图例扩充"已消散"（与堆叠图底层灰带同源同色）
+    assert "已消散" in page.locator("#legend").inner_text()
 
 
 def test_p_change_requires_apply_confirmation(page, live_url: str) -> None:
@@ -177,3 +179,28 @@ def test_low_denominator_dashed_series(page, live_url_low: str) -> None:
     page.wait_for_selector("#radius-chart canvas")
     # LOW001 lead 48 仅 1/4 成员在场（25% < 30%）→ 低分母时次数 = 1（虚线序列启用）
     assert page.locator("#radius-wrap").get_attribute("data-low-count") == "1"
+
+
+def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
+    # members 样本 leads=0/24/48 无低分母：mean 线不截断；关键圆=0/24（48 为滑块当前时次）
+    _open_stats(page, live_url)
+    assert page.locator('path[data-mean-cut]').count() == 0
+    keys = page.locator("[data-stats-circle-key]")
+    assert keys.count() == 2
+    assert {keys.nth(i).get_attribute("data-stats-circle-key") for i in range(2)} == {"0", "24"}
+    labels = page.locator("[data-mean-label]")
+    assert labels.count() == 2
+    texts = {labels.nth(i).inner_text() for i in range(2)}
+    assert any(t.startswith("0h·") for t in texts) and any(t.startswith("24h·") for t in texts)
+
+
+def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
+    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h，48h 关键圆不绘制（仅滑块当前高亮圆）
+    page.goto(live_url_low)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("#radius-chart canvas")
+    cut = page.locator('path[data-mean-cut]')
+    assert cut.count() == 1
+    assert cut.first.get_attribute("data-mean-cut") == "48"
+    keys = page.locator("[data-stats-circle-key]")
+    assert {keys.nth(i).get_attribute("data-stats-circle-key") for i in range(keys.count())} == {"0", "24"}

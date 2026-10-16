@@ -46,5 +46,17 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 .muted { font-size: .78rem; color: #667; margin-top: 1rem; white-space: pre-wrap; }
 #status.error { color: #b91c1c; }
 
+/* 地图上关键时次的均值强度标签（divIcon 内容，居中于圆心） */
+.mean-label { width: 0 !important; height: 0 !important; }
+.mean-label-tag {
+  display: inline-block; transform: translate(-50%, -50%); white-space: nowrap;
+  background: rgba(15, 23, 42, .78); color: #fff; font-size: .72rem;
+  padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .55);
+}
+.mean-label-tag i {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 4px; vertical-align: -1px;
+}
+
 #legend .item { display: flex; align-items: center; font-size: .78rem; margin: .15rem 0; }
 #legend .chip { width: 14px; height: 14px; border-radius: 3px; margin-right: .45rem; border: 1px solid rgba(0,0,0,.25); }

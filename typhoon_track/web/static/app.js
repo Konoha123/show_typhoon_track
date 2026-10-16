@@ -384,19 +384,23 @@ function renderPressureChart() {
 function renderStackChart() {
   const { width, height } = cardSize('stack-wrap');
   const leads = state.stats.leads.map((l) => l.lead_h);
+  const nTotal = state.stats.leads[0]?.n_total ?? 0;
   const hasUnknown = state.stats.leads.some((l) => (l.category_counts[STATS.unknown.key] ?? 0) > 0);
   const order = hasUnknown ? [...STACK_ORDER, STATS.unknown.key] : [...STACK_ORDER];
+  // 占比堆叠：各带值 = 累计成员数 / 成员总数 × 100（消散计入分母，各时次合计 100%）
   let acc = leads.map(() => 0);
   const data = [leads];
   const series = [{}];
   for (const key of order) {
     acc = acc.map((v, i) => v + (state.stats.leads[i].category_counts[key] ?? 0));
-    data.push(acc.slice());
+    const share = acc.map((v) => (nTotal ? +((v * 100) / nTotal).toFixed(2) : 0));
+    data.push(share);
+    // 不透明填充：上层完全覆盖下层，各带颜色与左栏图例一致（透明填充会与下层混色）
     series.push({
       label: CATEGORY_BY_KEY[key]?.label ?? key,
-      stroke: (CATEGORY_BY_KEY[key]?.color ?? '#888') + 'cc',
+      stroke: CATEGORY_BY_KEY[key]?.color ?? '#888888',
       width: 0.8,
-      fill: (CATEGORY_BY_KEY[key]?.color ?? '#888') + '73',
+      fill: CATEGORY_BY_KEY[key]?.color ?? '#888888',
       points: { show: false },
     });
   }
@@ -404,18 +408,23 @@ function renderStackChart() {
   stackChart = new uPlot(
     {
       width, height,
-      title: '强度分布（自底向上：已消散→TD→…→H5，灰底为已消散成员）',
+      title: '强度分布（占成员总数百分比；自底向上：已消散→TD→…→H5）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
-      scales: { x: { time: false }, y: {} },
-      axes: [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }, { label: '成员数' }],
+      scales: { x: { time: false }, y: { range: () => [0, 100] } },
+      axes: [
+        { label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) },
+        { label: '占比 (%)', values: (u, vals) => vals.map((v) => `${Math.round(v)}%`) },
+      ],
       series,
       hooks: {
         setCursor: (u) => {
           statsCursorReadout(u, readout, (lead, e) => {
             const parts = order
-              .map((key) => e.category_counts[key] ?? 0)
-              .map((count, i) => (count > 0 ? `${CATEGORY_BY_KEY[order[i]]?.label ?? order[i]}×${count}` : ''))
+              .map((key) => [key, e.category_counts[key] ?? 0])
+              .map(([key, count]) => (count > 0
+                ? `${CATEGORY_BY_KEY[key]?.label ?? key} ${Math.round((count * 100) / Math.max(e.n_total, 1))}%(${count})`
+                : ''))
               .filter(Boolean);
             return `${lead} h | ${parts.join(' ') || '无成员'} | n ${e.n_present}/${e.n_total}`;
           });
@@ -425,7 +434,7 @@ function renderStackChart() {
     data,
     $('stack-chart'),
   );
-  $('stack-wrap').setAttribute('data-n-total', String(state.stats.leads[0]?.n_total ?? ''));
+  $('stack-wrap').setAttribute('data-n-total', String(nTotal));
 }
 
 function renderRadiusChart() {
@@ -496,39 +505,58 @@ function statsPopupText(lead, entry) {
   ].filter(Boolean).join('<br>');
 }
 
+function meanLeadLabel(entry) {
+  // 关键时次的均值强度标签：等级色点 + 时效 + 平均风速（缺失保持缺失，不显示 kt）
+  const wind = entry.mean_wind != null ? `·${Math.round(entry.mean_wind)}kt` : '';
+  const dot = entry.mean_wind != null
+    ? `<i style="background:${windColor(entry.mean_wind)}"></i>`
+    : '';
+  return `<span class="mean-label-tag">${dot}${entry.lead_h}h${wind}</span>`;
+}
+
 function renderStatsLayer() {
   statsLayer.clearLayers();
   meanDotsByKey.clear();
   if (!statsVisible()) return;
-  const leads = state.stats.leads.filter((l) => l.mean_lat != null && l.mean_lon != null);
-  const coords = leads.map((l) => [l.mean_lat, toSignedLon(l.mean_lon)]);
+  const allLeads = state.stats.leads.filter((l) => l.mean_lat != null && l.mean_lon != null);
+  const centerOf = (l) => [l.mean_lat, toSignedLon(l.mean_lon)];
+
+  // mean 线截断：自首时次起连续绘制，遇到低分母时次（消散比例 > 1-30% 阈值）即停止延伸
+  let cutIndex = allLeads.length;
+  for (let i = 0; i < allLeads.length; i += 1) {
+    if (allLeads[i].low_denominator) { cutIndex = i; break; }
+  }
+  const drawnLeads = allLeads.slice(0, cutIndex);
   // 统计图层一律不拦截地图/成员线的指针事件（interactive:false），避免遮挡 M4 交互
-  if (coords.length >= 2) {
-    const track = L.polyline(coords, {
+  if (drawnLeads.length >= 2) {
+    const track = L.polyline(drawnLeads.map(centerOf), {
       color: MEAN_COLOR, weight: 3.5, opacity: 0.9, interactive: false,
     }).addTo(statsLayer);
     track._path?.setAttribute('data-mean-track', state.storm ?? ''); // E2E/调试锚点
+    if (cutIndex < allLeads.length) {
+      track._path?.setAttribute('data-mean-cut', String(allLeads[cutIndex].lead_h));
+    }
   }
-  for (const entry of leads) {
-    const c = [entry.mean_lat, toSignedLon(entry.mean_lon)];
-    const dot = L.circleMarker(c, {
+  for (const entry of drawnLeads) {
+    const dot = L.circleMarker(centerOf(entry), {
       radius: 2.5, color: MEAN_COLOR, weight: 0.5, fillColor: MEAN_COLOR, fillOpacity: 0.7,
       interactive: false,
     }).addTo(statsLayer);
     meanDotsByKey.set(entry.lead_h, dot);
   }
-  // 滑块当前时效：均值中心高亮点（可点开弹窗）+ 当前 p 的概率半径圆
+
+  // 滑块当前时次（高亮样式，低分母时次同样绘制，数据不删仅视觉区分）
   const entry = state.stats.leads.find((l) => l.lead_h === state.leadCut)
-    ?? leads[leads.length - 1];
+    ?? allLeads[allLeads.length - 1];
+  const currentLead = entry?.lead_h;
   if (entry && entry.mean_lat != null) {
-    const center = [entry.mean_lat, toSignedLon(entry.mean_lon)];
-    const marker = L.circleMarker(center, {
+    const marker = L.circleMarker(centerOf(entry), {
       radius: 6, color: MEAN_COLOR, weight: 2, fillColor: '#2563eb', fillOpacity: 0.95,
     }).bindPopup(statsPopupText(entry.lead_h, entry)).addTo(statsLayer);
     marker._path?.setAttribute('data-mean-center', String(entry.lead_h));
     const radiusKm = entry.radius_km[state.pApplied];
     if (radiusKm != null) {
-      const circle = L.circle(center, {
+      const circle = L.circle(centerOf(entry), {
         radius: radiusKm * 1000, color: '#2563eb', weight: 1.5, opacity: 0.9,
         fill: false, dashArray: '6 5', interactive: false,
       }).addTo(statsLayer);
@@ -536,6 +564,24 @@ function renderStatsLayer() {
       circle._path?.setAttribute('data-p', state.pApplied);
       circle._path?.setAttribute('data-radius-km', String(Math.round(radiusKm)));
     }
+  }
+
+  // 关键时次（24h 倍数的实际存在时次）：淡色概率圆 + 均值强度标签；
+  // 与 mean 线同口径止于截断点（低分母时次的均值强度不具参考性，不标注），当前时次已高亮故排除
+  for (const l of drawnLeads) {
+    if (l.lead_h % 24 !== 0 || l.lead_h === currentLead) continue;
+    const radiusKm = l.radius_km[state.pApplied];
+    if (radiusKm == null) continue;
+    const circle = L.circle(centerOf(l), {
+      radius: radiusKm * 1000, color: '#2563eb', weight: 1, opacity: 0.4,
+      fill: false, dashArray: '2 4', interactive: false,
+    }).addTo(statsLayer);
+    circle._path?.setAttribute('data-stats-circle-key', String(l.lead_h));
+    const label = L.marker(centerOf(l), {
+      icon: L.divIcon({ className: 'mean-label', html: meanLeadLabel(l), iconSize: null }),
+      interactive: false, keyboard: false,
+    }).addTo(statsLayer);
+    label.getElement()?.setAttribute('data-mean-label', String(l.lead_h));
   }
 }
 
@@ -882,7 +928,9 @@ $('p-apply').addEventListener('click', () => {
 
 (function initLegend() {
   const box = $('legend');
-  for (const stop of WIND_SCALE) {
+  // 与堆叠图同源同色：强度条目之外扩充"已消散"（成员未输出该时次），单一图例避免两套口径
+  const stops = [...WIND_SCALE, { label: `${STATS.dissipated.label}（成员未输出该时次）`, color: STATS.dissipated.color }];
+  for (const stop of stops) {
     const item = document.createElement('div');
     item.className = 'item';
     const chip = document.createElement('span');
