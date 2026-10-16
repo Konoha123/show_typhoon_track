@@ -250,9 +250,10 @@ function renderChart(rows) {
     points: { show: false },
     spanGaps: false,
   }));
-  // 均值线用虚线加粗：密集的成员彩线中实线难以分辨（R5 白描边方案视觉突兀已撤），虚线辨识度最高
+  // 均值线：纯黑长虚线加粗（uPlot stroke 正序、末位在最上层；纯黑与 12 色成员板零撞色，
+  // 在密集重叠形成的深色彩带上对比最强）
   const meanSeries = meanWindByLead
-    ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 4, dash: [10, 6], points: { show: false }, spanGaps: false }]
+    ? [{ label: '均值（自算）', stroke: '#000000', width: 5, dash: [20, 12], points: { show: false }, spanGaps: false }]
     : [];
   const meanDataIndex = 1 + chartMembers.length; // 均值在 data 中的索引
   let tipUpdate = null;
@@ -277,7 +278,7 @@ function renderChart(rows) {
           tipUpdate(`${lead}h · 均值 ${meanValue == null ? '—' : meanValue.toFixed(1)} kt`, u.cursor.left);
         }],
         setSeries: [(u, i, value) => {
-          const member = chartMembers[i - 1];
+          const member = chartMembers[i - 1]; // 末位为均值线（无地图联动），索引超界自然跳过
           if (member == null || !linesByMember.has(member)) return;
           const focused = value === true || (value != null && value.focus === true);
           if (focused) {
@@ -398,7 +399,7 @@ function renderPressureChart() {
     }),
   );
   if (meanPressure) data.push(leads.map((l) => meanPressure.get(l) ?? null));
-  const meanDataIndex = 1 + members.length; // 均值在 data 中的索引
+  const meanDataIndex = 1 + members.length; // 均值在 data 中的索引（末位=最上层）
   const readout = $('pressure-readout');
   let tipUpdate = null;
   pressureChart = new uPlot(
@@ -418,7 +419,7 @@ function renderPressureChart() {
           spanGaps: false,
         })),
         meanPressure
-          ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 4, dash: [10, 6], points: { show: false }, spanGaps: false }]
+          ? [{ label: '均值（自算）', stroke: '#000000', width: 5, dash: [20, 12], points: { show: false }, spanGaps: false }]
           : [],
       ),
       hooks: {
