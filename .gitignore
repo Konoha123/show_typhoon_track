@@ -38,6 +38,10 @@ yarn-error.log*
 # 运行时数据：页面导入的原始 CSV 存放目录
 uploads/
 
+# 运行时数据：预存地点（用户手工维护；仅模板入库）
+places/*
+!places/places.example.csv
+
 # 演示脚本导出的选择结果产物
 selected*.csv
 selected_track.csv

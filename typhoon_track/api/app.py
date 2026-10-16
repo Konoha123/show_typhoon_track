@@ -49,10 +49,18 @@ def default_store() -> DatasetStore:
     return DatasetStore(PROJECT_ROOT / "uploads")
 
 
-def create_app(store: DatasetStore | None = None) -> FastAPI:
+def default_places_path() -> Path:
+    """默认预存地点文件：仓库根目录下 places/places.csv（用户手工维护，git 忽略）。"""
+    return PROJECT_ROOT / "places" / "places.csv"
+
+
+def create_app(
+    store: DatasetStore | None = None, places_path: str | Path | None = None
+) -> FastAPI:
     app = FastAPI(title="typhoon-track", version="0.1.0")
     app.state.store = store if store is not None else default_store()
     app.state.tile_config = load_tile_config()
+    app.state.places_path = Path(places_path) if places_path is not None else default_places_path()
     app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     routes_api.register(app)
     routes_pages.register(app, templates_dir=WEB_DIR / "templates")

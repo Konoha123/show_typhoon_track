@@ -52,6 +52,23 @@ class DatasetListResponse(BaseModel):
     datasets: list[DatasetMeta]
 
 
+class Place(BaseModel):
+    """单个预存地点（来自 places/places.csv，契约见 service.places）。"""
+
+    name: str
+    lat: float
+    lon: float
+    note: str | None = None
+
+
+class PlacesResponse(BaseModel):
+    """预存地点响应；文件缺失时 available=False 且 places 为空（前端仅临时选点）。"""
+
+    available: bool
+    places: list[Place]
+    warnings: list[str]
+
+
 class TrackFilters(BaseModel):
     """轨迹查询参数（全部可选；语义同 core.filter_rows，值不匹配时 400）。"""
 

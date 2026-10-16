@@ -1,0 +1,5 @@
+# 预存地点模板：复制为 places/places.csv 后自行维护（本目录除 example 外均被 git 忽略）
+# 列：name,lat,lon,note（note 可选；name 唯一；lat∈[-90,90]、lon∈[-180,180] 十进制度；# 注释行忽略）
+name,lat,lon,note
+东京,35.6895,139.6917,示例：日本关东
+那霸,26.2124,127.6809,示例：日本冲绳

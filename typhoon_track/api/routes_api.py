@@ -1,21 +1,25 @@
-"""REST 路由：CSV 双入口上传（kind=forecast|observation）、轨迹查询与集合统计。
+"""REST 路由：CSV 双入口上传（kind=forecast|observation）、轨迹查询、集合统计与预存地点。
 
 输入输出结构由 .schemas 的 pydantic 契约定义，并同步进入 OpenAPI 文档。
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from typhoon_track.service.datasets import KINDS, DatasetStore
+from typhoon_track.service.places import load_places
 from typhoon_track.service.queries import ensemble_stats, track_rows
 
 from .schemas import (
     DatasetListResponse,
     DatasetMeta,
     EnsembleStatsResponse,
+    Place,
+    PlacesResponse,
     TrackFilters,
     TrackPoint,
     TracksResponse,
@@ -43,6 +47,22 @@ def register(app: FastAPI) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return DatasetMeta.model_validate(parsed.meta)
+
+    @app.get("/api/places", response_model=PlacesResponse)
+    def list_places() -> PlacesResponse:
+        """预存地点热读取（每次请求现读 places.csv，坏行跳过并报 warnings）。"""
+        path = Path(app.state.places_path)
+        try:
+            result = load_places(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return PlacesResponse(
+            available=result.available,
+            places=[
+                Place(name=p.name, lat=p.lat, lon=p.lon, note=p.note) for p in result.places
+            ],
+            warnings=list(result.warnings),
+        )
 
     @app.get("/api/datasets", response_model=DatasetListResponse)
     def list_datasets() -> DatasetListResponse:
