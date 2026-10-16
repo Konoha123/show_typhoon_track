@@ -12,12 +12,15 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from typhoon_track.service.datasets import KINDS, DatasetStore
 from typhoon_track.service.places import load_places
-from typhoon_track.service.queries import ensemble_stats, track_rows
+from typhoon_track.service.queries import ensemble_stats, impact_stats, track_rows
 
 from .schemas import (
+    IMPACT_THRESHOLD_LABELS,
     DatasetListResponse,
     DatasetMeta,
     EnsembleStatsResponse,
+    ImpactStatsResponse,
+    ImpactThresholdStats,
     Place,
     PlacesResponse,
     TrackFilters,
@@ -121,4 +124,46 @@ def register(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return EnsembleStatsResponse(
             dataset_id=dataset_id, kind=parsed.kind, **payload
+        )
+
+    @app.get(
+        "/api/datasets/{dataset_id}/impact-stats", response_model=ImpactStatsResponse
+    )
+    def get_impact_stats(
+        dataset_id: str,
+        lat: Annotated[float, Query(description="目标地点纬度（十进制度，-90–90）")],
+        lon: Annotated[float, Query(description="目标地点经度（十进制度，-180–180）")],
+        storm: Annotated[str | None, Query(description="气旋编号；多气旋数据集必须指定")] = None,
+        init: Annotated[str | None, Query(description="起报时次；多起报数据集必须指定")] = None,
+    ) -> ImpactStatsResponse:
+        try:
+            parsed = _store().load(dataset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if parsed.kind != "forecast":
+            raise HTTPException(status_code=400, detail="影响概率仅适用于预报数据集（kind=forecast）")
+        try:
+            payload = impact_stats(parsed.frame, lat=lat, lon=lon, storm=storm, init=init)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        thresholds = [
+            ImpactThresholdStats(
+                **stat,
+                label=IMPACT_THRESHOLD_LABELS.get(
+                    int(stat["threshold_kt"]), f"≥{stat['threshold_kt']} kt"
+                ),
+            )
+            for stat in payload["thresholds"]
+        ]
+        return ImpactStatsResponse(
+            dataset_id=dataset_id,
+            kind=parsed.kind,
+            storm=storm,
+            init=init,
+            lat=lat,
+            lon=lon,
+            thresholds=thresholds,
+            closest=payload["closest"],
         )

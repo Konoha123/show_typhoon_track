@@ -151,3 +151,47 @@ class EnsembleStatsResponse(BaseModel):
     p_values: list[int]
     count: int
     leads: list[EnsembleLeadStats]
+
+
+IMPACT_THRESHOLD_LABELS: dict[int, str] = {
+    34: "烈风（≥34 kt）",
+    50: "暴风（≥50 kt）",
+    64: "飓风（≥64 kt）",
+}
+
+
+class ImpactThresholdStats(BaseModel):
+    """单一风速阈值的目标地点影响统计（口径见 core.impact 与 M6 基线）。"""
+
+    threshold_kt: int
+    label: str
+    hit_members: int
+    total_members: int
+    fraction: float | None  # total_members 为 0 时为 null
+
+
+class ClosestApproach(BaseModel):
+    """mean 口径最近接近时次（自算逐时次均值位置，非文件 mean 成员线）。"""
+
+    lead_h: float
+    valid: str | None = None  # ISO 8601（UTC）
+    distance_km: float
+    bearing_deg: float  # 地点→气旋中心方位角（正北 0°、顺时针 0–360°）
+    compass: str  # 16 方位文字
+    mean_wind: float | None = None
+    mean_pressure: float | None = None
+    mean_lat: float
+    mean_lon: float
+
+
+class ImpactStatsResponse(BaseModel):
+    """影响统计响应；thresholds 固定 34/50/64 kt 三级，closest 无有效位置时为 null。"""
+
+    dataset_id: str
+    kind: Kind
+    storm: str | None
+    init: str | None
+    lat: float
+    lon: float
+    thresholds: list[ImpactThresholdStats]
+    closest: ClosestApproach | None

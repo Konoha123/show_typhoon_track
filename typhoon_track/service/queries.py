@@ -1,4 +1,4 @@
-"""轨迹查询：筛选（filter_rows 语义）+ 经度双约定 + 行级 JSON 载荷；集合概率统计编排。"""
+"""轨迹查询：筛选（filter_rows 语义）+ 经度双约定 + 行级 JSON 载荷；集合统计与影响统计编排。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typhoon_track.core import (
     DEFAULT_P_VALUES,
     ensemble_profile,
     filter_rows,
+    impact_profile,
     signed_longitude,
 )
 
@@ -62,6 +63,54 @@ def ensemble_stats(
         "p_values": list(p_values),
         "count": len(profiles),
         "leads": [_lead_payload(profile) for profile in profiles],
+    }
+
+
+def impact_stats(
+    frame: pd.DataFrame,
+    *,
+    lat: float,
+    lon: float,
+    storm: str | None = None,
+    init: str | None = None,
+) -> dict[str, Any]:
+    """单一 (storm, init) 对目标地点的影响统计载荷（口径见 core.impact 与 M6 基线）。
+
+    三级阈值成员命中 + mean 口径最近接近；storm/init 不唯一时由 core 拒绝混合。
+    """
+    rows = filter_rows(frame, storm=storm, init=init)
+    profile = impact_profile(rows, lat=lat, lon=lon)
+    closest: dict[str, Any] | None = None
+    if profile.closest is not None:
+        approach = profile.closest
+        closest = _jsonable_record(
+            {
+                "lead_h": approach.lead_h,
+                "valid": approach.valid,
+                "distance_km": approach.distance_km,
+                "bearing_deg": approach.bearing_deg,
+                "compass": approach.compass,
+                "mean_wind": approach.mean_wind,
+                "mean_pressure": approach.mean_pressure,
+                "mean_lat": approach.mean_lat,
+                "mean_lon": approach.mean_lon,
+            }
+        )
+    return {
+        "storm": storm,
+        "init": init,
+        "lat": lat,
+        "lon": lon,
+        "thresholds": [
+            {
+                "threshold_kt": stat.threshold_kt,
+                "hit_members": stat.hit_members,
+                "total_members": stat.total_members,
+                "fraction": stat.fraction,
+            }
+            for stat in profile.thresholds
+        ],
+        "closest": closest,
     }
 
 
