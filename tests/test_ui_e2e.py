@@ -204,3 +204,30 @@ def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
     assert cut.first.get_attribute("data-mean-cut") == "48"
     keys = page.locator("[data-stats-circle-key]")
     assert {keys.nth(i).get_attribute("data-stats-circle-key") for i in range(keys.count())} == {"0", "24"}
+
+
+def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
+    # 防整图单色回归（R1 bug：不透明填充下数组末位带覆盖整图）：
+    # members 样本仅 TD/TS 两带——应存在浅蓝(TD)与绿(TS)带色，且无 H5 紫
+    _open_stats(page, live_url)
+    counts = page.evaluate(
+        """() => {
+          const canvas = document.querySelector('#stack-chart canvas');
+          const ctx = canvas.getContext('2d');
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          const near = (r, g, b, R, G, B) => Math.abs(r - R) < 25 && Math.abs(g - G) < 25 && Math.abs(b - B) < 25;
+          let green = 0, blue = 0, purple = 0, gray = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            if (data[i + 3] < 10) continue;
+            if (near(r, g, b, 0x66, 0xc2, 0xa5)) green++;
+            else if (near(r, g, b, 0x6f, 0xb7, 0xe0)) blue++;
+            else if (near(r, g, b, 0x9d, 0x4e, 0xdd)) purple++;
+            else if (near(r, g, b, 0x9c, 0xa3, 0xaf)) gray++;
+          }
+          return { green, blue, purple, gray };
+        }"""
+    )
+    assert counts["green"] > 50, "未检测到 TS 绿带"
+    assert counts["blue"] > 50, "未检测到 TD 浅蓝带"
+    assert counts["purple"] == 0, "members 样本不应出现 H5 紫带"

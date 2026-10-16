@@ -388,19 +388,24 @@ function renderStackChart() {
   const hasUnknown = state.stats.leads.some((l) => (l.category_counts[STATS.unknown.key] ?? 0) > 0);
   const order = hasUnknown ? [...STACK_ORDER, STATS.unknown.key] : [...STACK_ORDER];
   // 占比堆叠：各带值 = 累计成员数 / 成员总数 × 100（消散计入分母，各时次合计 100%）
+  const cumulative = {};
   let acc = leads.map(() => 0);
-  const data = [leads];
-  const series = [{}];
   for (const key of order) {
     acc = acc.map((v, i) => v + (state.stats.leads[i].category_counts[key] ?? 0));
-    const share = acc.map((v) => (nTotal ? +((v * 100) / nTotal).toFixed(2) : 0));
-    data.push(share);
-    // 不透明填充：上层完全覆盖下层，各带颜色与左栏图例一致（透明填充会与下层混色）
+    cumulative[key] = acc.map((v) => (nTotal ? +((v * 100) / nTotal).toFixed(2) : 0));
+  }
+  const data = [leads];
+  const series = [{}];
+  // uPlot 按数组顺序绘制、后画覆盖先画：不透明填充的堆叠面积需按"视觉自顶向下"排列
+  // （顶层带先画整片，后续底层带逐个覆盖到自身累计值，各带可见区域即增量段）
+  for (const key of [...order].reverse()) {
+    const color = CATEGORY_BY_KEY[key]?.color ?? '#888888';
+    data.push(cumulative[key]);
     series.push({
       label: CATEGORY_BY_KEY[key]?.label ?? key,
-      stroke: CATEGORY_BY_KEY[key]?.color ?? '#888888',
+      stroke: color,
       width: 0.8,
-      fill: CATEGORY_BY_KEY[key]?.color ?? '#888888',
+      fill: color,
       points: { show: false },
     });
   }
@@ -566,15 +571,16 @@ function renderStatsLayer() {
     }
   }
 
-  // 关键时次（24h 倍数的实际存在时次）：淡色概率圆 + 均值强度标签；
+  // 关键时次（24h 倍数的实际存在时次）：概率圆 + 均值强度标签；
   // 与 mean 线同口径止于截断点（低分母时次的均值强度不具参考性，不标注），当前时次已高亮故排除
   for (const l of drawnLeads) {
     if (l.lead_h % 24 !== 0 || l.lead_h === currentLead) continue;
     const radiusKm = l.radius_km[state.pApplied];
     if (radiusKm == null) continue;
     const circle = L.circle(centerOf(l), {
-      radius: radiusKm * 1000, color: '#2563eb', weight: 1, opacity: 0.4,
-      fill: false, dashArray: '2 4', interactive: false,
+      radius: radiusKm * 1000, color: '#1d4ed8', weight: 1.5, opacity: 0.75,
+      fillColor: '#2563eb', fillOpacity: 0.04, fill: true,
+      dashArray: '3 5', interactive: false,
     }).addTo(statsLayer);
     circle._path?.setAttribute('data-stats-circle-key', String(l.lead_h));
     const label = L.marker(centerOf(l), {
