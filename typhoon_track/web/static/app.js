@@ -27,7 +27,7 @@ const state = {
   storm: null, init: null, member: 'ALL', leadCut: null,
   fcRows: [], obsRows: [], leadSteps: [],
   selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
-  stats: null, pSelected: '100', pApplied: '100',
+  stats: null, pSelected: '100', pApplied: '100', selectedKeyLead: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -63,14 +63,27 @@ async function api(path, params) {
 /* ---------- 地图 ---------- */
 
 const map = L.map('map', { worldCopyJump: true }).setView([22, 132], 4);
-map.on('click', () => setMemberSelection(null)); // 点击空白（底图/观测层/点位冒泡）取消持久选中
+map.on('click', () => { // 点击空白（底图/观测层/点位冒泡）取消持久选中（成员与关键标签）
+  setMemberSelection(null);
+  if (state.selectedKeyLead != null) setSelectedKeyLead(null);
+});
 L.tileLayer(window.TILE_CONFIG.urlTemplate, {
   attribution: window.TILE_CONFIG.attribution,
   maxZoom: 20, maxNativeZoom: window.TILE_CONFIG.maxZoom,
 }).addTo(map);
 const forecastLayer = L.layerGroup().addTo(map);
 const obsLayer = L.layerGroup().addTo(map);
+// 概率圆专用 Canvas renderer：SVG path 的 zoom 增量更新会丢失圆类几何（d="M0 0"），
+// Canvas 在视图变化时全量重绘，不受影响
+const statsCircleRenderer = L.canvas({ padding: 0.5 });
 const statsLayer = L.layerGroup().addTo(map);
+// 引线标签的像素偏移依赖当前 zoom：视图变化后仅重算锚点坐标（updateStatsAnchors），
+// 不重建图层（规避 zoom 动画窗口内矢量层增删与渲染器异步更新的竞态）
+let statsAnchorRetimer = null;
+map.on('moveend zoomend resize', () => {
+  clearTimeout(statsAnchorRetimer);
+  statsAnchorRetimer = setTimeout(updateStatsAnchors, 300);
+});
 
 function pointCoords(row) {
   if (row.lat == null) return null;
@@ -169,22 +182,24 @@ function renderChart(rows) {
           { label: '风速 kt', scale: 'y', stroke: '#2563eb', width: 2, points: { space: 14, r: 3 } },
           { label: '气压 hPa', scale: 'y2', stroke: '#dc2626', width: 2, dash: [5, 3], points: { space: 14, r: 3 } },
         ],
+        // 注意：uPlot 1.6.32 的 options.hooks 各成员必须为数组（单函数会在 fire 时抛
+        // "forEach is not a function"，且联动静默失效）——所有 hooks 一律 [fn] 形式
         hooks: {
-          setCursor: (u) => {
+          setCursor: [(u) => {
             const idx = u.cursor.idx;
             if (idx == null) { highlightMarker(null); readout.textContent = ''; return; }
             const lead = u.data[0][idx];
             highlightMarker(lead);
             readout.textContent = `${lead} h | 风 ${fmt(u.data[1][idx])} kt | 压 ${fmt(u.data[2][idx])} hPa`;
-          },
-          ready: (u) => {
+          }],
+          ready: [(u) => {
             u.over.addEventListener('click', () => {
               const idx = u.cursor.idx;
               if (idx == null) return;
               const marker = markersByKey.get(`${state.member}#${u.data[0][idx]}`);
               if (marker) { marker.openPopup(); map.panTo(marker.getLatLng()); }
             });
-          },
+          }],
         },
       },
       [leads, wind, pres],
@@ -225,11 +240,11 @@ function renderChart(rows) {
       axes: baseAxes.concat([{ label: '风速 (kt)' }]),
       series: [{}].concat(memberSeries, meanSeries),
       hooks: {
-        setCursor: (u) => {
+        setCursor: [(u) => {
           const idx = u.cursor.idx;
           readout.textContent = idx == null ? '' : `${u.data[0][idx]} h`;
-        },
-        setSeries: (u, i, value) => {
+        }],
+        setSeries: [(u, i, value) => {
           const member = chartMembers[i - 1];
           if (member == null || !linesByMember.has(member)) return;
           const focused = value === true || (value != null && value.focus === true);
@@ -244,15 +259,15 @@ function renderChart(rows) {
               focusChartSeries(member, true); // 恢复被图表 prox blur 误关的选中聚焦
             }
           }
-        },
-        ready: (u) => {
+        }],
+        ready: [(u) => {
           // 图表侧发起选中：点击时若有 hover 聚焦成员，则选中/切换/取消
           u.over.addEventListener('click', () => {
             if (hoverMember != null) {
               setMemberSelection(state.selectedMember === hoverMember ? null : hoverMember);
             }
           });
-        },
+        }],
       },
     },
     data,
@@ -320,11 +335,10 @@ function cardSize(wrapId) {
 }
 
 function highlightMeanDot(lead) {
-  // 与 M4 highlightMarker 同型：放大当前时次的均值点，其余还原
+  // 与 M4 highlightMarker 同型：放大当前时次的均值点，其余还原（divIcon 用 class 切换）
   for (const [key, dot] of meanDotsByKey) {
-    const active = key === lead;
-    dot.setStyle({ radius: active ? 7 : 2.5, weight: active ? 2 : 0.5 });
-    if (active) dot.bringToFront();
+    const element = dot.getElement()?.querySelector('.mean-dot-tag');
+    element?.classList.toggle('active', key === lead);
   }
 }
 
@@ -373,7 +387,7 @@ function renderPressureChart() {
           : [],
       ),
       hooks: {
-        setCursor: (u) => { statsCursorReadout(u, readout, (lead, e) => `${lead} h | 均值气压 ${fmt(e.mean_pressure)} hPa | n ${e.n_present}/${e.n_total}`); },
+        setCursor: [(u) => { statsCursorReadout(u, readout, (lead, e) => `${lead} h | 均值气压 ${fmt(e.mean_pressure)} hPa | n ${e.n_present}/${e.n_total}`); }],
       },
     },
     data,
@@ -423,7 +437,7 @@ function renderStackChart() {
       ],
       series,
       hooks: {
-        setCursor: (u) => {
+        setCursor: [(u) => {
           statsCursorReadout(u, readout, (lead, e) => {
             const parts = order
               .map((key) => [key, e.category_counts[key] ?? 0])
@@ -433,7 +447,7 @@ function renderStackChart() {
               .filter(Boolean);
             return `${lead} h | ${parts.join(' ') || '无成员'} | n ${e.n_present}/${e.n_total}`;
           });
-        },
+        }],
       },
     },
     data,
@@ -469,13 +483,13 @@ function renderRadiusChart() {
       axes: [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }, { label: '半径 (km)' }],
       series: [{}].concat(seriesDef),
       hooks: {
-        setCursor: (u) => {
+        setCursor: [(u) => {
           statsCursorReadout(u, readout, (lead, e) => {
             const r = e.radius_km[p];
             const low = e.low_denominator ? '（低分母）' : '';
             return `${lead} h | 半径 ${r == null ? '—' : `${Math.round(r)} km`} | n ${e.n_present}/${e.n_total}${low}`;
           });
-        },
+        }],
       },
     },
     data,
@@ -519,10 +533,93 @@ function meanLeadLabel(entry) {
   return `<span class="mean-label-tag">${dot}${entry.lead_h}h${wind}</span>`;
 }
 
+/* 关键时次标签与圆的选中联动：单选、再点取消、点地图空白取消（与 M4 成员选中同型） */
+const keyCircles = new Map(); // lead_h -> L.circle
+const keyLabels = new Map(); // lead_h -> { marker, span, leader }
+let lastStatsLayout = null; // { drawnLeads, currentLead }：zoom 后仅更新标签/引线坐标，不重建图层
+const KEY_CIRCLE_BASE = {
+  color: '#1d4ed8', weight: 1.5, opacity: 0.75, fillColor: '#2563eb', fillOpacity: 0.04,
+  dashArray: '3 5',
+};
+const KEY_CIRCLE_HIGHLIGHT = {
+  color: '#2563eb', weight: 2.5, opacity: 1, fillColor: '#2563eb', fillOpacity: 0.08,
+  dashArray: '3 5',
+};
+
+function applyKeySelectionStyles() {
+  for (const [lead, circle] of keyCircles) {
+    circle.setStyle(state.selectedKeyLead === lead ? KEY_CIRCLE_HIGHLIGHT : KEY_CIRCLE_BASE);
+  }
+  for (const [, entry] of keyLabels) {
+    entry.span.classList.toggle('selected', entry.marker._lead === state.selectedKeyLead);
+  }
+  const mapEl = $('map'); // E2E/调试锚点（Canvas 圆无 path 元素，挂容器）
+  if (state.selectedKeyLead == null) mapEl.removeAttribute('data-key-selected');
+  else mapEl.setAttribute('data-key-selected', String(state.selectedKeyLead));
+}
+
+function setSelectedKeyLead(lead) {
+  const target = lead != null && keyLabels.has(lead) ? lead : null;
+  if (target === state.selectedKeyLead) return;
+  state.selectedKeyLead = target;
+  applyKeySelectionStyles();
+}
+
+function labelAnchorNeighbors(drawnLeads, index) {
+  // 引线偏移方向：取轨迹相邻时次作切线（首尾点退化为自身与邻点）
+  const prev = drawnLeads[Math.max(0, index - 1)];
+  const next = drawnLeads[Math.min(drawnLeads.length - 1, index + 1)];
+  return [prev, next];
+}
+
+function offsetLatLng(center, prev, next, side) {
+  // 沿轨迹法线偏移固定像素。用 map.project/unproject 纯投影计算（世界像素=CSS 像素），
+  // 不经 latLngToContainerPoint（后者包含 pane transform，zoom 动画收尾窗口内读取会得到
+  // 带残留的坐标，曾致锚点地理点系统性漂移）
+  const zoom = map.getZoom();
+  const c = map.project(center, zoom);
+  const p = map.project([prev.mean_lat, toSignedLon(prev.mean_lon)], zoom);
+  const n = map.project([next.mean_lat, toSignedLon(next.mean_lon)], zoom);
+  const dx = n.x - p.x;
+  const dy = n.y - p.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = c.x + (-dy / len) * 55 * side;
+  const py = c.y + (dx / len) * 55 * side;
+  return map.unproject([px, py], zoom);
+}
+
+function destinationPoint(lat, lon, bearingDeg, distKm) {
+  // 球面直达点公式（与 core.geo.haversine 同球模型 R=6371.0088）
+  const R = 6371.0088;
+  const br = bearingDeg * Math.PI / 180;
+  const la = lat * Math.PI / 180;
+  const lo = lon * Math.PI / 180;
+  const dr = distKm / R;
+  const la2 = Math.asin(Math.sin(la) * Math.cos(dr) + Math.cos(la) * Math.sin(dr) * Math.cos(br));
+  const lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(dr) * Math.cos(la),
+    Math.cos(dr) - Math.sin(la) * Math.sin(la2));
+  return [la2 * 180 / Math.PI, ((lo2 * 180 / Math.PI + 540) % 360) - 180];
+}
+
+function geoCirclePoints(center, radiusKm, segments = 64) {
+  // 概率圆用多边形逼近（polyline 家族）：Leaflet SVG 对 circle/circleMarker 的 zoom 几何
+  // 重算存在写空缺陷（d="M0 0"），多边形路径不受影响
+  const points = [];
+  for (let i = 0; i <= segments; i += 1) {
+    points.push(destinationPoint(center[0], center[1], (360 / segments) * i, radiusKm));
+  }
+  return points;
+}
+
 function renderStatsLayer() {
   statsLayer.clearLayers();
   meanDotsByKey.clear();
+  keyCircles.clear();
+  keyLabels.clear();
+  $('map').removeAttribute('data-key-leads');
+  $('map').removeAttribute('data-current-circle');
   if (!statsVisible()) return;
+  const redrawables = []; // 渲染完成后统一强制重绘（Leaflet SVG 异步几何写入在动画窗口内可能缺失）
   const allLeads = state.stats.leads.filter((l) => l.mean_lat != null && l.mean_lon != null);
   const centerOf = (l) => [l.mean_lat, toSignedLon(l.mean_lon)];
 
@@ -532,21 +629,26 @@ function renderStatsLayer() {
     if (allLeads[i].low_denominator) { cutIndex = i; break; }
   }
   const drawnLeads = allLeads.slice(0, cutIndex);
-  // 统计图层一律不拦截地图/成员线的指针事件（interactive:false），避免遮挡 M4 交互
+  // 统计图层除关键标签外一律不拦截指针事件（interactive:false），避免遮挡 M4 交互
   if (drawnLeads.length >= 2) {
     const track = L.polyline(drawnLeads.map(centerOf), {
       color: MEAN_COLOR, weight: 3.5, opacity: 0.9, interactive: false,
+      smoothFactor: 0, noClip: true,
     }).addTo(statsLayer);
+    redrawables.push(track);
     track._path?.setAttribute('data-mean-track', state.storm ?? ''); // E2E/调试锚点
     if (cutIndex < allLeads.length) {
       track._path?.setAttribute('data-mean-cut', String(allLeads[cutIndex].lead_h));
     }
   }
   for (const entry of drawnLeads) {
-    const dot = L.circleMarker(centerOf(entry), {
-      radius: 2.5, color: MEAN_COLOR, weight: 0.5, fillColor: MEAN_COLOR, fillOpacity: 0.7,
-      interactive: false,
+    // 时次点用 divIcon（HTML 定位）而非 circleMarker：Leaflet SVG 的 circleMarker 几何
+    // 在 zoom 重算时会被写成 M0 0（同容器 polyline 正常，属其更新路径缺陷），HTML 定位不受影响
+    const dot = L.marker(centerOf(entry), {
+      icon: L.divIcon({ className: 'mean-dot', html: '<span class="mean-dot-tag"></span>', iconSize: null }),
+      interactive: false, keyboard: false,
     }).addTo(statsLayer);
+    dot.getElement()?.setAttribute('data-mean-dot', String(entry.lead_h)); // E2E/调试锚点（引线终点）
     meanDotsByKey.set(entry.lead_h, dot);
   }
 
@@ -555,39 +657,95 @@ function renderStatsLayer() {
     ?? allLeads[allLeads.length - 1];
   const currentLead = entry?.lead_h;
   if (entry && entry.mean_lat != null) {
-    const marker = L.circleMarker(centerOf(entry), {
-      radius: 6, color: MEAN_COLOR, weight: 2, fillColor: '#2563eb', fillOpacity: 0.95,
+    const marker = L.marker(centerOf(entry), {
+      icon: L.divIcon({
+        className: 'mean-dot',
+        html: '<span class="mean-dot-tag mean-dot-center"></span>',
+        iconSize: null,
+      }),
+      keyboard: false,
     }).bindPopup(statsPopupText(entry.lead_h, entry)).addTo(statsLayer);
-    marker._path?.setAttribute('data-mean-center', String(entry.lead_h));
+    marker.getElement()?.setAttribute('data-mean-center', String(entry.lead_h));
     const radiusKm = entry.radius_km[state.pApplied];
     if (radiusKm != null) {
-      const circle = L.circle(centerOf(entry), {
-        radius: radiusKm * 1000, color: '#2563eb', weight: 1.5, opacity: 0.9,
+      const circle = L.polygon(geoCirclePoints(centerOf(entry), radiusKm), {
+        color: '#2563eb', weight: 1.5, opacity: 0.9,
         fill: false, dashArray: '6 5', interactive: false,
+        smoothFactor: 0, noClip: true, renderer: statsCircleRenderer,
       }).addTo(statsLayer);
-      circle._path?.setAttribute('data-stats-circle', state.pApplied);
-      circle._path?.setAttribute('data-p', state.pApplied);
-      circle._path?.setAttribute('data-radius-km', String(Math.round(radiusKm)));
+      // Canvas 圆无 path 元素：E2E/调试锚点挂到 #map 容器
+      $('map').setAttribute('data-current-circle', `${state.pApplied}|${Math.round(radiusKm)}`);
     }
   }
 
-  // 关键时次（24h 倍数的实际存在时次）：概率圆 + 均值强度标签；
+  // 关键时次（24h 倍数的实际存在时次）：概率圆 + 引线式强度标签（法线偏移）；
   // 与 mean 线同口径止于截断点（低分母时次的均值强度不具参考性，不标注），当前时次已高亮故排除
-  for (const l of drawnLeads) {
+  let keyIndex = 0;
+  for (let i = 0; i < drawnLeads.length; i += 1) {
+    const l = drawnLeads[i];
     if (l.lead_h % 24 !== 0 || l.lead_h === currentLead) continue;
     const radiusKm = l.radius_km[state.pApplied];
     if (radiusKm == null) continue;
-    const circle = L.circle(centerOf(l), {
-      radius: radiusKm * 1000, color: '#1d4ed8', weight: 1.5, opacity: 0.75,
-      fillColor: '#2563eb', fillOpacity: 0.04, fill: true,
-      dashArray: '3 5', interactive: false,
+    const center = centerOf(l);
+    const circle = L.polygon(geoCirclePoints(center, radiusKm), {
+      ...KEY_CIRCLE_BASE, interactive: false, smoothFactor: 0, noClip: true,
+      renderer: statsCircleRenderer,
     }).addTo(statsLayer);
-    circle._path?.setAttribute('data-stats-circle-key', String(l.lead_h));
-    const label = L.marker(centerOf(l), {
+    keyCircles.set(l.lead_h, circle);
+
+    // 引线标签：偏移点在轨迹法线方向，关键点奇偶交替两侧，减少与轨迹/彼此重叠
+    const [prev, next] = labelAnchorNeighbors(drawnLeads, i);
+    const side = keyIndex % 2 === 0 ? 1 : -1;
+    keyIndex += 1;
+    const anchor = offsetLatLng(center, prev, next, side);
+    if (window.__probeRenders) {
+      const a = map.latLngToContainerPoint(anchor);
+      const c = map.latLngToContainerPoint(center);
+      console.log(`[probe-render] lead=${l.lead_h} anchorDist=${Math.round(a.distanceTo(c))} zoom=${map.getZoom()}`);
+    }
+    const leader = L.polyline([center, anchor], {
+      color: '#475569', weight: 0.8, opacity: 0.8, interactive: false,
+      smoothFactor: 0, noClip: true,
+    }).addTo(statsLayer);
+    redrawables.push(leader);
+    leader._path?.setAttribute('data-mean-leader', String(l.lead_h));
+    const label = L.marker(anchor, {
       icon: L.divIcon({ className: 'mean-label', html: meanLeadLabel(l), iconSize: null }),
-      interactive: false, keyboard: false,
+      keyboard: false,
     }).addTo(statsLayer);
+    label._lead = l.lead_h;
     label.getElement()?.setAttribute('data-mean-label', String(l.lead_h));
+    label.on('click', (e) => {
+      L.DomEvent.stopPropagation(e); // 阻止冒泡到 map click（空白取消）
+      setSelectedKeyLead(state.selectedKeyLead === l.lead_h ? null : l.lead_h);
+    });
+    keyLabels.set(l.lead_h, { marker: label, leader, span: label.getElement()?.querySelector('.mean-label-tag') });
+  }
+  applyKeySelectionStyles(); // 重建后恢复选中态
+  $('map').setAttribute('data-key-leads', [...keyCircles.keys()].map(String).join(','));
+  if (!entry || entry.mean_lat == null || (entry.radius_km[state.pApplied] ?? null) == null) {
+    $('map').removeAttribute('data-current-circle');
+  }
+  lastStatsLayout = { drawnLeads, currentLead };
+}
+
+function updateStatsAnchors() {
+  // zoom/resize 后仅重算引线标签的偏移锚点（setLatLng 立即生效）。
+  // 不在此重建图层：zoom 动画窗口内增删矢量层会与 Leaflet 渲染器的异步几何更新竞态，
+  // 曾致部分时次点几何丢失（常驻图层由地图 viewreset 原生重定位，从未受影响）。
+  if (!lastStatsLayout || !statsVisible()) return;
+  let keyIndex = 0;
+  for (let i = 0; i < lastStatsLayout.drawnLeads.length; i += 1) {
+    const l = lastStatsLayout.drawnLeads[i];
+    if (l.lead_h % 24 !== 0 || l.lead_h === lastStatsLayout.currentLead) continue;
+    const entry = keyLabels.get(l.lead_h);
+    if (!entry) continue;
+    const center = [l.mean_lat, toSignedLon(l.mean_lon)];
+    const [prev, next] = labelAnchorNeighbors(lastStatsLayout.drawnLeads, i);
+    const anchor = offsetLatLng(center, prev, next, keyIndex % 2 === 0 ? 1 : -1);
+    keyIndex += 1;
+    entry.marker.setLatLng(anchor);
+    entry.leader.setLatLngs([center, anchor]);
   }
 }
 

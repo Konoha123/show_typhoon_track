@@ -110,7 +110,7 @@ python -m compileall -q typhoon_track  # L0 语法编译
 ruff check --no-fix .                 # L1 静态缺陷
 pyright                               # L2 静态类型
 python -m pip check && deptry . && lint-imports   # L3 依赖与架构
-python -m pytest -q                   # L5 功能测试（155 项基线，含 Playwright UI E2E）
+python -m pytest -q                   # L5 功能测试（156 项基线，含 Playwright UI E2E）
 ```
 
 ## 路线图

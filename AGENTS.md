@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 测试基线（pytest，`testpaths = tests demo_src`，共 155 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）、WNV3 配对真实数据交叉验证（缺文件自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 156 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`）、WNV3 配对真实数据交叉验证（缺文件自动跳过）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py
@@ -88,7 +88,7 @@
   ruff check --no-fix <源码目录或文件列表>   # L1
   pyright <源码目录或文件列表>               # L2
   python -m pip check && deptry . && lint-imports   # L3
-  python -m pytest -q                        # L5（基线 155 项，UI E2E 未装自动跳过）
+  python -m pytest -q                        # L5（基线 156 项，UI E2E 未装自动跳过）
   ```
 
 - 最低要求：L0 编译检查 + 现有测试全量回跑。

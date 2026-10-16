@@ -129,7 +129,7 @@ def _open_stats(page, live_url: str) -> None:
     page.goto(live_url)
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector('path[data-mean-track]')
-    page.wait_for_selector("[data-stats-circle]")
+    page.wait_for_selector("#map[data-current-circle]")
     for chart_id in ("#radius-chart", "#stack-chart", "#pressure-chart"):
         page.wait_for_selector(f"{chart_id} canvas")
 
@@ -137,9 +137,9 @@ def _open_stats(page, live_url: str) -> None:
 def test_stats_charts_render_with_p_default_100(page, live_url: str) -> None:
     _open_stats(page, live_url)
     assert page.locator("#p-select").input_value() == "100"
-    circle = page.locator("[data-stats-circle]")
-    assert circle.get_attribute("data-p") == "100"
-    assert circle.get_attribute("data-radius-km") is not None
+    # Canvas 圆的锚点挂 #map 容器：当前圆 "p|radiusKm"
+    current = page.locator("#map").get_attribute("data-current-circle")
+    assert current is not None and current.startswith("100|")
     assert page.locator("#stack-wrap").get_attribute("data-n-total") == "2"
     # 左栏图例扩充"已消散"（与堆叠图底层灰带同源同色）
     assert "已消散" in page.locator("#legend").inner_text()
@@ -150,10 +150,10 @@ def test_p_change_requires_apply_confirmation(page, live_url: str) -> None:
     page.select_option("#p-select", "50")
     page.wait_for_timeout(200)
     # 未点"应用"：地图圆与半径图保持旧 p（100）
-    assert page.locator("[data-stats-circle]").get_attribute("data-p") == "100"
+    assert page.locator("#map").get_attribute("data-current-circle").startswith("100|")
     assert page.locator("#radius-wrap").get_attribute("data-p") == "100"
     page.click("#p-apply")
-    page.wait_for_selector('[data-stats-circle][data-p="50"]')
+    page.wait_for_function("document.getElementById('map').getAttribute('data-current-circle')?.startsWith('50|')")
     assert page.locator("#radius-wrap").get_attribute("data-p") == "50"
 
 
@@ -185,9 +185,8 @@ def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
     # members 样本 leads=0/24/48 无低分母：mean 线不截断；关键圆=0/24（48 为滑块当前时次）
     _open_stats(page, live_url)
     assert page.locator('path[data-mean-cut]').count() == 0
-    keys = page.locator("[data-stats-circle-key]")
-    assert keys.count() == 2
-    assert {keys.nth(i).get_attribute("data-stats-circle-key") for i in range(2)} == {"0", "24"}
+    key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
+    assert key_leads == {"0", "24"}
     labels = page.locator("[data-mean-label]")
     assert labels.count() == 2
     texts = {labels.nth(i).inner_text() for i in range(2)}
@@ -195,15 +194,15 @@ def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
 
 
 def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
-    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h，48h 关键圆不绘制（仅滑块当前高亮圆）
+    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h，关键圆止于截断点（0/24）
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector("#radius-chart canvas")
     cut = page.locator('path[data-mean-cut]')
     assert cut.count() == 1
     assert cut.first.get_attribute("data-mean-cut") == "48"
-    keys = page.locator("[data-stats-circle-key]")
-    assert {keys.nth(i).get_attribute("data-stats-circle-key") for i in range(keys.count())} == {"0", "24"}
+    key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
+    assert key_leads == {"0", "24"}
 
 
 def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
@@ -231,3 +230,28 @@ def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
     assert counts["green"] > 50, "未检测到 TS 绿带"
     assert counts["blue"] > 50, "未检测到 TD 浅蓝带"
     assert counts["purple"] == 0, "members 样本不应出现 H5 紫带"
+
+
+def test_key_label_selection_highlights_circle(page, live_url: str) -> None:
+    # 引线存在（0h/24h 两个关键标签各一条）
+    _open_stats(page, live_url)
+    page.wait_for_selector('[data-mean-label="24"] .mean-label-tag')
+    assert page.locator('path[data-mean-leader]').count() == 2
+    # 点击标签：对应概率圆高亮（#map 容器锚点）+ 标签选中态
+    page.click('[data-mean-label="24"] .mean-label-tag')
+    page.wait_for_function("document.getElementById('map').getAttribute('data-key-selected') === '24'")
+    klass = page.locator('[data-mean-label="24"] .mean-label-tag').get_attribute("class") or ""
+    assert "selected" in klass
+    # 点击另一标签切换选中
+    page.click('[data-mean-label="0"] .mean-label-tag')
+    page.wait_for_function("document.getElementById('map').getAttribute('data-key-selected') === '0'")
+    # 再点同一标签取消
+    page.click('[data-mean-label="0"] .mean-label-tag')
+    page.wait_for_timeout(200)
+    assert page.locator("#map").get_attribute("data-key-selected") is None
+    # 选中后点击地图空白海域取消（与成员选中同型）
+    page.click('[data-mean-label="24"] .mean-label-tag')
+    page.wait_for_function("document.getElementById('map').getAttribute('data-key-selected') === '24'")
+    page.locator("#map").click(position={"x": 50, "y": 330})
+    page.wait_for_timeout(250)
+    assert page.locator("#map").get_attribute("data-key-selected") is None

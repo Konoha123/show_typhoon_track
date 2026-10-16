@@ -46,7 +46,7 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 .muted { font-size: .78rem; color: #667; margin-top: 1rem; white-space: pre-wrap; }
 #status.error { color: #b91c1c; }
 
-/* 地图上关键时次的均值强度标签（divIcon 内容，居中于圆心） */
+/* 地图上关键时次的均值强度标签（divIcon 内容，居中于锚点） */
 .mean-label { width: 0 !important; height: 0 !important; }
 .mean-label-tag {
   display: inline-block; transform: translate(-50%, -50%); white-space: nowrap;
@@ -56,6 +56,28 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 .mean-label-tag i {
   display: inline-block; width: 8px; height: 8px; border-radius: 2px;
   margin-right: 4px; vertical-align: -1px;
+}
+.mean-label-tag.selected {
+  background: #2563eb; border-color: #fff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, .45);
+}
+
+/* 均值轨迹时次点（divIcon，HTML 定位，规避 SVG circleMarker 的 zoom 几何缺陷） */
+.mean-dot { width: 0 !important; height: 0 !important; }
+.mean-dot-tag {
+  display: inline-block; transform: translate(-50%, -50%);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #0f172a; border: 1px solid rgba(255, 255, 255, .7);
+  box-shadow: 0 0 2px rgba(0, 0, 0, .5);
+}
+.mean-dot-tag.active {
+  width: 14px; height: 14px; background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .35);
+}
+.mean-dot-tag.mean-dot-center {
+  width: 13px; height: 13px; background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .35);
+  cursor: pointer;
 }
 
 #legend .item { display: flex; align-items: center; font-size: .78rem; margin: .15rem 0; }
