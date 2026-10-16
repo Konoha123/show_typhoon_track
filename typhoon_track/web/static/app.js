@@ -140,6 +140,22 @@ let hoverMember = null; // 当前 hover 聚焦的成员（临时高亮，与持�
 
 const fmt = (v) => (v == null ? '—' : v);
 
+/* 光标提示：跟随十字光标显示时次与关键数值（uPlot 无内建 tooltip，叠加于 over 层） */
+function makeCursorTip(uplot) {
+  const tip = document.createElement('div');
+  tip.className = 'cursor-tip';
+  tip.style.display = 'none';
+  uplot.over.appendChild(tip);
+  return (text, leftPx) => {
+    if (text == null) { tip.style.display = 'none'; return; }
+    tip.textContent = text;
+    tip.style.display = 'block';
+    const half = tip.offsetWidth / 2 + 4;
+    const x = Math.min(Math.max(leftPx, half), uplot.over.clientWidth - half);
+    tip.style.left = `${x}px`;
+  };
+}
+
 function destroyChart() {
   if (chart) { chart.destroy(); chart = null; }
   $('chart-readout').textContent = '';
@@ -162,17 +178,17 @@ function renderChart(rows) {
   if (!leads.length) return;
   const { width, height } = chartSize();
   const readout = $('chart-readout');
-  const cutoff = state.leadCut == null ? '全部' : `${state.leadCut} h`;
   const baseAxes = [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }];
 
   if (state.member !== 'ALL') {
     const byLead = new Map(rows.map((r) => [r.lead_h, r]));
     const wind = leads.map((l) => byLead.get(l)?.wind ?? null);
     const pres = leads.map((l) => byLead.get(l)?.pressure ?? null);
+    let tipUpdate = null;
     chart = new uPlot(
       {
         width, height,
-        title: `成员 ${state.member}：风速/气压（截至 ${cutoff}）`,
+        title: `成员 ${state.member}：风速 / 气压`,
         legend: { show: true, live: true },
         cursor: { drag: { x: false, y: false } },
         scales: { x: { time: false }, y: {}, y2: {} },
@@ -187,10 +203,17 @@ function renderChart(rows) {
         hooks: {
           setCursor: [(u) => {
             const idx = u.cursor.idx;
-            if (idx == null) { highlightMarker(null); readout.textContent = ''; return; }
+            if (idx == null) {
+              highlightMarker(null); readout.textContent = '';
+              if (tipUpdate) tipUpdate(null, 0);
+              return;
+            }
             const lead = u.data[0][idx];
             highlightMarker(lead);
             readout.textContent = `${lead} h | 风 ${fmt(u.data[1][idx])} kt | 压 ${fmt(u.data[2][idx])} hPa`;
+            if (tipUpdate) {
+              tipUpdate(`${lead}h · 风 ${fmt(u.data[1][idx])} kt · 压 ${fmt(u.data[2][idx])} hPa`, u.cursor.left);
+            }
           }],
           ready: [(u) => {
             u.over.addEventListener('click', () => {
@@ -205,6 +228,7 @@ function renderChart(rows) {
       [leads, wind, pres],
       $('chart'),
     );
+    tipUpdate = makeCursorTip(chart);
     return;
   }
 
@@ -218,7 +242,11 @@ function renderChart(rows) {
       return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
     }),
   );
-  if (meanWindByLead) data.push(leads.map((l) => meanWindByLead.get(l) ?? null));
+  // 均值线加白色描边底层：从密集的成员彩线中衬托出来（白底先画，深色主线后画覆盖）
+  if (meanWindByLead) {
+    const meanVals = leads.map((l) => meanWindByLead.get(l) ?? null);
+    data.push(meanVals.slice(), meanVals);
+  }
   const memberSeries = chartMembers.map((m, i) => ({
     label: `成员 ${m}`,
     stroke: memberColor(i),
@@ -227,12 +255,17 @@ function renderChart(rows) {
     spanGaps: false,
   }));
   const meanSeries = meanWindByLead
-    ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false }]
+    ? [
+        { label: '均值（自算）', stroke: '#ffffff', width: 5, points: { show: false }, spanGaps: false },
+        { label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false },
+      ]
     : [];
+  const meanDataIndex = 1 + chartMembers.length + 1; // 均值主线在 data 中的索引（白描边后一位）
+  let tipUpdate = null;
   chart = new uPlot(
     {
       width, height,
-      title: `成员风速曲线（${chartMembers.length} 成员，配色与地图一致；深色为自算均值）`,
+      title: '成员风速曲线（白描边深色线 = 自算均值）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       focus: { alpha: 0.12 },
@@ -243,6 +276,11 @@ function renderChart(rows) {
         setCursor: [(u) => {
           const idx = u.cursor.idx;
           readout.textContent = idx == null ? '' : `${u.data[0][idx]} h`;
+          if (!tipUpdate) return;
+          if (idx == null) { tipUpdate(null, 0); return; }
+          const lead = u.data[0][idx];
+          const meanValue = meanWindByLead ? u.data[meanDataIndex][idx] : null;
+          tipUpdate(`${lead}h · 均值 ${meanValue == null ? '—' : meanValue.toFixed(1)} kt`, u.cursor.left);
         }],
         setSeries: [(u, i, value) => {
           const member = chartMembers[i - 1];
@@ -273,6 +311,7 @@ function renderChart(rows) {
     data,
     $('chart'),
   );
+  tipUpdate = makeCursorTip(chart);
   // 重建后恢复持久选中的曲线聚焦（触发 setSeries hook，光晕幂等）
   if (state.selectedMember != null) {
     const idx = chartMembers.indexOf(state.selectedMember);
@@ -364,12 +403,18 @@ function renderPressureChart() {
       return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
     }),
   );
-  if (meanPressure) data.push(leads.map((l) => meanPressure.get(l) ?? null));
+  // 均值线加白色描边底层（与风速图同法）
+  if (meanPressure) {
+    const meanVals = leads.map((l) => meanPressure.get(l) ?? null);
+    data.push(meanVals.slice(), meanVals);
+  }
+  const meanDataIndex = 1 + members.length + 1; // 均值主线在 data 中的索引（白描边后一位）
   const readout = $('pressure-readout');
+  let tipUpdate = null;
   pressureChart = new uPlot(
     {
       width, height,
-      title: `成员气压曲线（${members.length} 成员，配色与地图一致；深色为自算均值）`,
+      title: '成员气压曲线（白描边深色线 = 自算均值）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       scales: { x: { time: false }, y: {} },
@@ -383,16 +428,28 @@ function renderPressureChart() {
           spanGaps: false,
         })),
         meanPressure
-          ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false }]
+          ? [
+              { label: '均值（自算）', stroke: '#ffffff', width: 5, points: { show: false }, spanGaps: false },
+              { label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false },
+            ]
           : [],
       ),
       hooks: {
-        setCursor: [(u) => { statsCursorReadout(u, readout, (lead, e) => `${lead} h | 均值气压 ${fmt(e.mean_pressure)} hPa | n ${e.n_present}/${e.n_total}`); }],
+        setCursor: [(u) => {
+          statsCursorReadout(u, readout, (lead, e) => `${lead} h | 均值气压 ${fmt(e.mean_pressure)} hPa | n ${e.n_present}/${e.n_total}`);
+          if (!tipUpdate) return;
+          const idx = u.cursor.idx;
+          if (idx == null) { tipUpdate(null, 0); return; }
+          const lead = u.data[0][idx];
+          const meanValue = meanPressure ? u.data[meanDataIndex][idx] : null;
+          tipUpdate(`${lead}h · 均值气压 ${meanValue == null ? '—' : meanValue.toFixed(1)} hPa`, u.cursor.left);
+        }],
       },
     },
     data,
     $('pressure-chart'),
   );
+  tipUpdate = makeCursorTip(pressureChart);
 }
 
 function renderStackChart() {
@@ -427,7 +484,7 @@ function renderStackChart() {
   stackChart = new uPlot(
     {
       width, height,
-      title: '强度分布（占成员总数百分比；自底向上：已消散→TD→…→H5）',
+      title: '强度分布（占成员总数百分比）',
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       scales: { x: { time: false }, y: { range: () => [0, 100] } },
@@ -476,7 +533,7 @@ function renderRadiusChart() {
   radiusChart = new uPlot(
     {
       width, height,
-      title: `位置概率半径（覆盖离均值中心最近 ${p}% 成员的最小半径；圆心=球面均值）`,
+      title: `位置概率半径（p = ${p}%）`,
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       scales: { x: { time: false }, y: {} },

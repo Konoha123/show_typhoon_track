@@ -255,3 +255,34 @@ def test_key_label_selection_highlights_circle(page, live_url: str) -> None:
     page.locator("#map").click(position={"x": 50, "y": 330})
     page.wait_for_timeout(250)
     assert page.locator("#map").get_attribute("data-key-selected") is None
+
+
+def test_cursor_tooltip_shows_lead_and_mean(page, live_url: str) -> None:
+    # 十字光标提示：全部成员模式显示时次 + 自算均值；单成员模式显示时次 + 风/压
+    _open_stats(page, live_url)
+    tip = page.locator("#chart .cursor-tip")
+    page.hover("#chart", position={"x": 200, "y": 160})
+    page.wait_for_timeout(400)
+    text = tip.inner_text()
+    assert "h · 均值" in text and " kt" in text, text
+    page.hover("#pressure-chart", position={"x": 200, "y": 160})
+    page.wait_for_timeout(400)
+    assert "h · 均值气压" in page.locator("#pressure-chart .cursor-tip").inner_text()
+    page.select_option("#member", "01")
+    page.wait_for_timeout(400)
+    page.hover("#chart", position={"x": 200, "y": 160})
+    page.wait_for_timeout(400)
+    single = page.locator("#chart .cursor-tip").inner_text()
+    assert "h · 风" in single and "压" in single, single
+
+
+def test_chart_titles_concise(page, live_url: str) -> None:
+    # 标题不含开发指导性文字与重复的成员数信息
+    _open_stats(page, live_url)
+    titles = page.evaluate(
+        "() => [...document.querySelectorAll('.u-title')].map(el => el.textContent)"
+    )
+    joined = " ".join(titles)
+    assert "配色与地图一致" not in joined
+    assert "自底向上" not in joined
+    assert "成员，" not in joined

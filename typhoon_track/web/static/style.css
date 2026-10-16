@@ -42,6 +42,13 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
   font-size: .78rem; color: #333; background: rgba(255,255,255,.85);
   padding: 2px 8px; border-radius: 4px; pointer-events: none;
 }
+/* 跟随十字光标的时次/数值提示（叠加在 uPlot over 层内） */
+.cursor-tip {
+  position: absolute; top: 34px; transform: translate(-50%, 0);
+  background: rgba(15, 23, 42, .88); color: #fff; font-size: .75rem;
+  padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,.4);
+  white-space: nowrap; pointer-events: none; z-index: 600;
+}
 
 .muted { font-size: .78rem; color: #667; margin-top: 1rem; white-space: pre-wrap; }
 #status.error { color: #b91c1c; }
