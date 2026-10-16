@@ -704,7 +704,7 @@ function renderStatsLayer() {
       console.log(`[probe-render] lead=${l.lead_h} anchorDist=${Math.round(a.distanceTo(c))} zoom=${map.getZoom()}`);
     }
     const leader = L.polyline([center, anchor], {
-      color: '#475569', weight: 0.8, opacity: 0.8, interactive: false,
+      color: MEAN_COLOR, weight: 1, opacity: 0.9, interactive: false,
       smoothFactor: 0, noClip: true,
     }).addTo(statsLayer);
     redrawables.push(leader);
