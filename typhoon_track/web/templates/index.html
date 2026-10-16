@@ -45,6 +45,13 @@
   </section>
 
   <section>
+    <h2>位置概率半径</h2>
+    <label for="p-select">覆盖最近 p% 成员（默认 100%）</label>
+    <select id="p-select"></select>
+    <button id="p-apply" type="button">应用</button>
+  </section>
+
+  <section>
     <h2>强度图例（kt，1 分钟平均，按数据提供口径）</h2>
     <div id="legend"></div>
   </section>
@@ -55,15 +62,28 @@
   <div id="map-wrap"><div id="map"></div></div>
 </main>
 <aside id="charts">
-  <div id="chart-wrap">
-    <div id="chart"></div>
-    <div id="chart-readout"></div>
+  <div class="chart-card" id="chart-wrap">
+    <div class="chart-body" id="chart"></div>
+    <div class="readout" id="chart-readout"></div>
+  </div>
+  <div class="chart-card hidden" id="pressure-wrap" data-stats-card>
+    <div class="chart-body" id="pressure-chart"></div>
+    <div class="readout" id="pressure-readout"></div>
+  </div>
+  <div class="chart-card hidden" id="stack-wrap" data-stats-card>
+    <div class="chart-body" id="stack-chart"></div>
+    <div class="readout" id="stack-readout"></div>
+  </div>
+  <div class="chart-card hidden" id="radius-wrap" data-stats-card>
+    <div class="chart-body" id="radius-chart"></div>
+    <div class="readout" id="radius-readout"></div>
   </div>
 </aside>
 
 <script src="/static/vendor/leaflet.js"></script>
 <script src="/static/vendor/uPlot.iife.min.js"></script>
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
+<script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
 <script type="module" src="/static/app.js"></script>
 </body>
 </html>

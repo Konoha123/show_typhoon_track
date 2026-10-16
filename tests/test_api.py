@@ -45,6 +45,13 @@ def test_index_page_renders(client: TestClient) -> None:
     assert 'id="chart"' in response.text
     assert "/static/vendor/uPlot.iife.min.js" in response.text
     assert "/static/vendor/uPlot.min.css" in response.text
+    # M5d：统计配置注入（分级/堆叠层级来自 core.ensemble 单源）+ p 控件 + 统计图表卡
+    assert "window.STATS_CONFIG" in response.text
+    assert "stackBottomUp" in response.text
+    assert 'id="p-select"' in response.text
+    assert 'id="p-apply"' in response.text
+    for card in ("pressure-wrap", "stack-wrap", "radius-wrap"):
+        assert f'id="{card}"' in response.text
 
 
 def test_static_vendor_served(client: TestClient) -> None:

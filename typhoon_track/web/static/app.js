@@ -1,16 +1,22 @@
-/* WNC 台风轨迹工作台（M3 功能 / M5c 三栏布局：左导入与图例 — 中地图 — 右可滚动图表栏）：
- * 数据流：数据集选择 -> 拉取轨迹行 -> 客户端筛选（起报/成员/时效）-> Leaflet 渲染。
- * 数据纪律：时效档位取实际存在的 lead_h，不插值；缺失保持缺失；不跨起报时次混合。*/
+/* WNC 台风轨迹工作台（M3/M4 功能 + M5d 概率特征；三栏布局：左导入与图例 — 中地图 — 右可滚动图表栏）：
+ * 数据流：数据集选择 -> 拉取轨迹行 -> 客户端筛选（起报/成员/时效）-> Leaflet 渲染；
+ *        (storm, init) 确定后拉取 ensemble-stats -> 均值轨迹/概率半径圆/统计图表。
+ * 数据纪律：时效档位取实际存在的 lead_h，不插值；缺失保持缺失；不跨起报时次混合；
+ *          集合统计口径见 window.STATS_CONFIG（单一事实来源 core.ensemble）。*/
 
-const WIND_SCALE = [
-  { min: 137, label: '≥137 kt（H5）', color: '#9d4edd' },
-  { min: 113, label: '113–136 kt（H4）', color: '#d62828' },
-  { min: 96, label: '96–112 kt（H3）', color: '#ef767a' },
-  { min: 83, label: '83–95 kt（H2）', color: '#f4a261' },
-  { min: 64, label: '64–82 kt（H1）', color: '#ffd166' },
-  { min: 34, label: '34–63 kt（TS）', color: '#66c2a5' },
-  { min: -Infinity, label: '<34 kt（TD）', color: '#6fb7e0' },
-];
+const STATS = window.STATS_CONFIG;
+const WIND_SCALE = STATS.categories.map((c) => ({
+  min: c.minKt == null ? -Infinity : c.minKt,
+  label: c.label,
+  color: c.color,
+}));
+const CATEGORY_BY_KEY = {};
+for (const c of STATS.categories) CATEGORY_BY_KEY[c.key] = c;
+CATEGORY_BY_KEY[STATS.dissipated.key] = STATS.dissipated;
+CATEGORY_BY_KEY[STATS.unknown.key] = STATS.unknown;
+const STACK_ORDER = [...STATS.stackBottomUp]; // 自底向上：已消散→TD→…→H5（消散不与 H5 相邻）
+const MEAN_COLOR = '#0f172a'; // 自算均值线（风速/气压/轨迹统一深色）
+
 const MEMBER_COLORS = [
   '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0',
   '#f032e6', '#bcf60c', '#fabebe', '#008080', '#9a6324', '#800000',
@@ -21,6 +27,7 @@ const state = {
   storm: null, init: null, member: 'ALL', leadCut: null,
   fcRows: [], obsRows: [], leadSteps: [],
   selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
+  stats: null, pSelected: '100', pApplied: '100',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -63,11 +70,18 @@ L.tileLayer(window.TILE_CONFIG.urlTemplate, {
 }).addTo(map);
 const forecastLayer = L.layerGroup().addTo(map);
 const obsLayer = L.layerGroup().addTo(map);
+const statsLayer = L.layerGroup().addTo(map);
 
 function pointCoords(row) {
   if (row.lat == null) return null;
   const lon = row.lon_signed != null ? row.lon_signed : row.lon;
   return lon == null ? null : [row.lat, lon];
+}
+
+function toSignedLon(lon) {
+  // 0–360° 与 −180–180° 双约定统一（纪律第 3 条）；缺失保持 null
+  if (lon == null) return null;
+  return ((lon % 360) + 540) % 360 - 180;
 }
 
 function popupText(row, groupKey) {
@@ -179,33 +193,37 @@ function renderChart(rows) {
     return;
   }
 
-  // 全部成员：每成员风速细线（配色与地图意面图一致，同 groupBy 顺序取色）
+  // 全部成员：每成员风速细线（配色与地图意面图一致，同 groupBy 顺序取色）+ 自算均值粗线
   const groups = groupBy(rows, (r) => r.member ?? '—');
   chartMembers = [...groups.keys()];
+  const meanWindByLead = meanSeriesByLead('mean_wind');
   const data = [leads].concat(
     chartMembers.map((m) => {
       const byLead = new Map(groups.get(m).map((r) => [r.lead_h, r.wind]));
       return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
     }),
   );
+  if (meanWindByLead) data.push(leads.map((l) => meanWindByLead.get(l) ?? null));
+  const memberSeries = chartMembers.map((m, i) => ({
+    label: `成员 ${m}`,
+    stroke: memberColor(i),
+    width: 1.2,
+    points: { show: false },
+    spanGaps: false,
+  }));
+  const meanSeries = meanWindByLead
+    ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false }]
+    : [];
   chart = new uPlot(
     {
       width, height,
-      title: `成员风速曲线（${chartMembers.length} 成员，配色与地图一致）`,
+      title: `成员风速曲线（${chartMembers.length} 成员，配色与地图一致；深色为自算均值）`,
       legend: { show: false },
       cursor: { drag: { x: false, y: false }, prox: 5 },
       focus: { alpha: 0.12 },
       scales: { x: { time: false }, y: {} },
       axes: baseAxes.concat([{ label: '风速 (kt)' }]),
-      series: [{}].concat(
-        chartMembers.map((m, i) => ({
-          label: `成员 ${m}`,
-          stroke: memberColor(i),
-          width: 1.2,
-          points: { show: false },
-          spanGaps: false,
-        })),
-      ),
+      series: [{}].concat(memberSeries, meanSeries),
       hooks: {
         setCursor: (u) => {
           const idx = u.cursor.idx;
@@ -264,6 +282,275 @@ function focusChartSeries(member, on) {
   if (!chart || state.member !== 'ALL') return;
   const idx = chartMembers.indexOf(member);
   if (idx >= 0) chart.setSeries(idx + 1, { focus: on });
+}
+
+/* ---------- 集合概率特征（M5d）：均值/分布/半径图表 + 地图均值轨迹与 p 圆 ---------- */
+
+let pressureChart = null;
+let stackChart = null;
+let radiusChart = null;
+const meanDotsByKey = new Map(); // lead_h -> circleMarker（统计图表 hover 联动）
+
+function statsVisible() {
+  return state.member === 'ALL' && state.stats != null && state.stats.count > 0;
+}
+
+function statsByLead() {
+  return state.stats ? new Map(state.stats.leads.map((l) => [l.lead_h, l])) : new Map();
+}
+
+function meanSeriesByLead(field) {
+  if (!statsVisible()) return null;
+  return new Map(state.stats.leads.map((l) => [l.lead_h, l[field]]));
+}
+
+function destroyStatsCharts() {
+  for (const c of [pressureChart, stackChart, radiusChart]) {
+    if (c) c.destroy();
+  }
+  pressureChart = null; stackChart = null; radiusChart = null;
+  for (const id of ['pressure-readout', 'stack-readout', 'radius-readout']) {
+    $(id).textContent = '';
+  }
+}
+
+function cardSize(wrapId) {
+  const wrap = $(wrapId);
+  return { width: Math.max(wrap.clientWidth - 16, 60), height: Math.max(wrap.clientHeight - 10, 60) };
+}
+
+function highlightMeanDot(lead) {
+  // 与 M4 highlightMarker 同型：放大当前时次的均值点，其余还原
+  for (const [key, dot] of meanDotsByKey) {
+    const active = key === lead;
+    dot.setStyle({ radius: active ? 7 : 2.5, weight: active ? 2 : 0.5 });
+    if (active) dot.bringToFront();
+  }
+}
+
+function statsCursorReadout(u, readout, format) {
+  const idx = u.cursor.idx;
+  if (idx == null) { highlightMeanDot(null); readout.textContent = ''; return; }
+  const lead = u.data[0][idx];
+  highlightMeanDot(lead);
+  const entry = statsByLead().get(lead);
+  readout.textContent = entry ? format(lead, entry) : `${lead} h`;
+}
+
+function renderPressureChart() {
+  const { width, height } = cardSize('pressure-wrap');
+  const rows = currentForecastRows();
+  const leads = [...new Set(rows.map((r) => r.lead_h).filter((v) => v != null))].sort((a, b) => a - b);
+  const groups = groupBy(rows, (r) => r.member ?? '—');
+  const members = [...groups.keys()];
+  const meanPressure = meanSeriesByLead('mean_pressure');
+  const data = [leads].concat(
+    members.map((m) => {
+      const byLead = new Map(groups.get(m).map((r) => [r.lead_h, r.pressure]));
+      return leads.map((l) => (byLead.has(l) ? byLead.get(l) : null));
+    }),
+  );
+  if (meanPressure) data.push(leads.map((l) => meanPressure.get(l) ?? null));
+  const readout = $('pressure-readout');
+  pressureChart = new uPlot(
+    {
+      width, height,
+      title: `成员气压曲线（${members.length} 成员，配色与地图一致；深色为自算均值）`,
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false }, prox: 5 },
+      scales: { x: { time: false }, y: {} },
+      axes: [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }, { label: '气压 (hPa)' }],
+      series: [{}].concat(
+        members.map((m, i) => ({
+          label: `成员 ${m}`,
+          stroke: memberColor(i),
+          width: 1.2,
+          points: { show: false },
+          spanGaps: false,
+        })),
+        meanPressure
+          ? [{ label: '均值（自算）', stroke: MEAN_COLOR, width: 2.5, points: { show: false }, spanGaps: false }]
+          : [],
+      ),
+      hooks: {
+        setCursor: (u) => { statsCursorReadout(u, readout, (lead, e) => `${lead} h | 均值气压 ${fmt(e.mean_pressure)} hPa | n ${e.n_present}/${e.n_total}`); },
+      },
+    },
+    data,
+    $('pressure-chart'),
+  );
+}
+
+function renderStackChart() {
+  const { width, height } = cardSize('stack-wrap');
+  const leads = state.stats.leads.map((l) => l.lead_h);
+  const hasUnknown = state.stats.leads.some((l) => (l.category_counts[STATS.unknown.key] ?? 0) > 0);
+  const order = hasUnknown ? [...STACK_ORDER, STATS.unknown.key] : [...STACK_ORDER];
+  let acc = leads.map(() => 0);
+  const data = [leads];
+  const series = [{}];
+  for (const key of order) {
+    acc = acc.map((v, i) => v + (state.stats.leads[i].category_counts[key] ?? 0));
+    data.push(acc.slice());
+    series.push({
+      label: CATEGORY_BY_KEY[key]?.label ?? key,
+      stroke: (CATEGORY_BY_KEY[key]?.color ?? '#888') + 'cc',
+      width: 0.8,
+      fill: (CATEGORY_BY_KEY[key]?.color ?? '#888') + '73',
+      points: { show: false },
+    });
+  }
+  const readout = $('stack-readout');
+  stackChart = new uPlot(
+    {
+      width, height,
+      title: '强度分布（自底向上：已消散→TD→…→H5，灰底为已消散成员）',
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false }, prox: 5 },
+      scales: { x: { time: false }, y: {} },
+      axes: [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }, { label: '成员数' }],
+      series,
+      hooks: {
+        setCursor: (u) => {
+          statsCursorReadout(u, readout, (lead, e) => {
+            const parts = order
+              .map((key) => e.category_counts[key] ?? 0)
+              .map((count, i) => (count > 0 ? `${CATEGORY_BY_KEY[order[i]]?.label ?? order[i]}×${count}` : ''))
+              .filter(Boolean);
+            return `${lead} h | ${parts.join(' ') || '无成员'} | n ${e.n_present}/${e.n_total}`;
+          });
+        },
+      },
+    },
+    data,
+    $('stack-chart'),
+  );
+  $('stack-wrap').setAttribute('data-n-total', String(state.stats.leads[0]?.n_total ?? ''));
+}
+
+function renderRadiusChart() {
+  const { width, height } = cardSize('radius-wrap');
+  const leads = state.stats.leads.map((l) => l.lead_h);
+  const p = state.pApplied;
+  const radius = (l) => l.radius_km[p];
+  // 低分母降权：n < 30%×n_total 的时次改虚线（数据保留，仅视觉区分）
+  const solid = state.stats.leads.map((l) => (l.low_denominator ? null : radius(l)));
+  const dashed = state.stats.leads.map((l) => (l.low_denominator ? radius(l) : null));
+  const lowCount = state.stats.leads.filter((l) => l.low_denominator).length;
+  const readout = $('radius-readout');
+  const seriesDef = lowCount
+    ? [
+        { label: `p=${p}%`, stroke: '#2563eb', width: 2, points: { space: 14, r: 3 }, spanGaps: false },
+        { label: `p=${p}%（低分母 n<${Math.round(STATS.lowDenominatorFraction * 100)}%）`, stroke: '#2563eb', width: 2, dash: [6, 4], points: { space: 14, r: 3 }, spanGaps: false },
+      ]
+    : [{ label: `p=${p}%`, stroke: '#2563eb', width: 2, points: { space: 14, r: 3 }, spanGaps: false }];
+  const data = lowCount ? [leads, solid, dashed] : [leads, solid];
+  radiusChart = new uPlot(
+    {
+      width, height,
+      title: `位置概率半径（覆盖离均值中心最近 ${p}% 成员的最小半径；圆心=球面均值）`,
+      legend: { show: false },
+      cursor: { drag: { x: false, y: false }, prox: 5 },
+      scales: { x: { time: false }, y: {} },
+      axes: [{ label: '时效 (h)', values: (u, vals) => vals.map((v) => `${v}h`) }, { label: '半径 (km)' }],
+      series: [{}].concat(seriesDef),
+      hooks: {
+        setCursor: (u) => {
+          statsCursorReadout(u, readout, (lead, e) => {
+            const r = e.radius_km[p];
+            const low = e.low_denominator ? '（低分母）' : '';
+            return `${lead} h | 半径 ${r == null ? '—' : `${Math.round(r)} km`} | n ${e.n_present}/${e.n_total}${low}`;
+          });
+        },
+      },
+    },
+    data,
+    $('radius-chart'),
+  );
+  $('radius-wrap').setAttribute('data-p', p);
+  $('radius-wrap').setAttribute('data-low-count', String(lowCount));
+}
+
+function renderStatsCharts() {
+  destroyStatsCharts();
+  const show = statsVisible();
+  for (const id of ['pressure-wrap', 'stack-wrap', 'radius-wrap']) {
+    $(id).classList.toggle('hidden', !show);
+  }
+  if (!show) return;
+  renderPressureChart();
+  renderStackChart();
+  renderRadiusChart();
+}
+
+function statsPopupText(lead, entry) {
+  const r = entry.radius_km[state.pApplied];
+  return [
+    `集合统计（自算口径）`,
+    `时效: ${lead} h`,
+    `分母: ${entry.n_present}/${entry.n_total} 成员`,
+    entry.mean_wind != null ? `平均风速: ${Math.round(entry.mean_wind)} kt` : '',
+    entry.mean_pressure != null ? `平均气压: ${Math.round(entry.mean_pressure)} hPa` : '',
+    r != null ? `p=${state.pApplied}% 半径: ${Math.round(r)} km` : '',
+    entry.low_denominator ? `低分母（n < ${Math.round(STATS.lowDenominatorFraction * 100)}%×总成员）` : '',
+  ].filter(Boolean).join('<br>');
+}
+
+function renderStatsLayer() {
+  statsLayer.clearLayers();
+  meanDotsByKey.clear();
+  if (!statsVisible()) return;
+  const leads = state.stats.leads.filter((l) => l.mean_lat != null && l.mean_lon != null);
+  const coords = leads.map((l) => [l.mean_lat, toSignedLon(l.mean_lon)]);
+  // 统计图层一律不拦截地图/成员线的指针事件（interactive:false），避免遮挡 M4 交互
+  if (coords.length >= 2) {
+    const track = L.polyline(coords, {
+      color: MEAN_COLOR, weight: 3.5, opacity: 0.9, interactive: false,
+    }).addTo(statsLayer);
+    track._path?.setAttribute('data-mean-track', state.storm ?? ''); // E2E/调试锚点
+  }
+  for (const entry of leads) {
+    const c = [entry.mean_lat, toSignedLon(entry.mean_lon)];
+    const dot = L.circleMarker(c, {
+      radius: 2.5, color: MEAN_COLOR, weight: 0.5, fillColor: MEAN_COLOR, fillOpacity: 0.7,
+      interactive: false,
+    }).addTo(statsLayer);
+    meanDotsByKey.set(entry.lead_h, dot);
+  }
+  // 滑块当前时效：均值中心高亮点（可点开弹窗）+ 当前 p 的概率半径圆
+  const entry = state.stats.leads.find((l) => l.lead_h === state.leadCut)
+    ?? leads[leads.length - 1];
+  if (entry && entry.mean_lat != null) {
+    const center = [entry.mean_lat, toSignedLon(entry.mean_lon)];
+    const marker = L.circleMarker(center, {
+      radius: 6, color: MEAN_COLOR, weight: 2, fillColor: '#2563eb', fillOpacity: 0.95,
+    }).bindPopup(statsPopupText(entry.lead_h, entry)).addTo(statsLayer);
+    marker._path?.setAttribute('data-mean-center', String(entry.lead_h));
+    const radiusKm = entry.radius_km[state.pApplied];
+    if (radiusKm != null) {
+      const circle = L.circle(center, {
+        radius: radiusKm * 1000, color: '#2563eb', weight: 1.5, opacity: 0.9,
+        fill: false, dashArray: '6 5', interactive: false,
+      }).addTo(statsLayer);
+      circle._path?.setAttribute('data-stats-circle', state.pApplied);
+      circle._path?.setAttribute('data-p', state.pApplied);
+      circle._path?.setAttribute('data-radius-km', String(Math.round(radiusKm)));
+    }
+  }
+}
+
+async function loadStats() {
+  state.stats = null;
+  if (!state.fcId || !state.storm || !state.init) { render(); return; }
+  try {
+    state.stats = await api(`/api/datasets/${state.fcId}/ensemble-stats`, {
+      storm: state.storm, init: state.init,
+    });
+  } catch (err) {
+    state.stats = null;
+    setStatus(`集合统计获取失败：${err.message}`, true);
+  }
+  render();
 }
 
 /* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼；
@@ -412,6 +699,8 @@ function render() {
   if (state.selectedMember != null) showMemberHighlight(state.selectedMember);
   updateStatusBar();
   renderChart(rows); // 重建后由其内部恢复选中成员的曲线聚焦
+  renderStatsLayer(); // M5d：均值轨迹 + 滑块当前时次的 p 半径圆
+  renderStatsCharts(); // M5d：气压/强度分布/概率半径图表（单成员模式自动隐藏）
 }
 
 /* ---------- 控件联动 ---------- */
@@ -456,7 +745,7 @@ function refreshDatasets() {
 
 async function loadStormOptions() {
   const meta = state.datasets.find((d) => d.dataset_id === state.fcId);
-  if (!meta) { state.fcRows = []; render(); return; }
+  if (!meta) { state.fcRows = []; state.stats = null; render(); return; }
   fillSelect(
     $('storm'),
     meta.summary.storms.map((s) => ({
@@ -499,7 +788,7 @@ async function onStormChange() {
   slider.value = slider.max;
   state.leadCut = steps.length ? steps[steps.length - 1] : null;
   $('lead-label').textContent = '全部';
-  render();
+  await loadStats(); // (storm, init) 就绪后拉取集合统计并渲染
 }
 
 async function onObsChange() {
@@ -560,7 +849,7 @@ $('fc-dataset').addEventListener('change', async () => {
   await onObsChange();
 });
 $('storm').addEventListener('change', async () => { await onStormChange(); await onObsChange(); });
-$('init').addEventListener('change', () => { state.init = $('init').value || null; render(); });
+$('init').addEventListener('change', () => { state.init = $('init').value || null; void loadStats(); });
 $('member').addEventListener('change', () => {
   state.member = $('member').value || 'ALL';
   state.selectedMember = null; // 切换成员视图模式时清除持久选中
@@ -573,6 +862,23 @@ $('lead').addEventListener('input', () => {
   render();
 });
 $('obs-dataset').addEventListener('change', onObsChange);
+
+/* p 下拉 + 应用按钮：切换 p 仅暂存，点击"应用"才重绘（半径/圆/读数） */
+(function initPSelect() {
+  const select = $('p-select');
+  for (const value of STATS.pValues) {
+    const el = document.createElement('option');
+    el.value = String(value);
+    el.textContent = `${value}%`;
+    select.appendChild(el);
+  }
+  select.value = state.pApplied;
+})();
+$('p-select').addEventListener('change', () => { state.pSelected = $('p-select').value; });
+$('p-apply').addEventListener('click', () => {
+  state.pApplied = state.pSelected;
+  render(); // 地图圆 + 半径曲线 + 弹窗读数统一按已应用的 p 重绘
+});
 
 (function initLegend() {
   const box = $('legend');
@@ -599,9 +905,17 @@ $('obs-dataset').addEventListener('change', onObsChange);
   if (state.fcId) await loadStormOptions();
 })();
 
-// 窗口尺寸变化仅重建曲线图（地图 Leaflet 自适应）
+// 窗口尺寸变化重建全部图表（地图 Leaflet 自适应）
 let chartResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(chartResizeTimer);
-  chartResizeTimer = setTimeout(() => renderChart(currentForecastRows()), 150);
+  chartResizeTimer = setTimeout(() => {
+    renderChart(currentForecastRows());
+    if (statsVisible()) {
+      destroyStatsCharts();
+      renderPressureChart();
+      renderStackChart();
+      renderRadiusChart();
+    }
+  }, 150);
 });

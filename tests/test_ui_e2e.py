@@ -1,6 +1,8 @@
 """UI E2E（Playwright 无头浏览器）：地图工作台核心交互回归。
 
-覆盖成员线持久选中状态机：点线选中、鼠标离开保持、点空白取消、点其它线切换。
+覆盖成员线持久选中状态机：点线选中、鼠标离开保持、点空白取消、点其它线切换；
+M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆叠层级次序、
+低分母虚线、单成员模式隐藏统计卡。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -24,6 +26,20 @@ pytest.importorskip("playwright", reason="未安装 Playwright，跳过 UI E2E")
 ROOT = Path(__file__).resolve().parents[1]
 MEMBERS = ROOT / "demo_src" / "sample_synthetic_ensemble.csv"
 
+# 4 成员、lead 48 仅剩 1 名（25% < 30%）：触发低分母降权
+LOW_DENOM_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa\n"
+    "LOW001,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000\n"
+    "LOW001,02,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.8,132.4,30,1004\n"
+    "LOW001,03,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.2,131.8,40,996\n"
+    "LOW001,04,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.6,132.2,33,1002\n"
+    "LOW001,01,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,19.0,129.6,55,985\n"
+    "LOW001,02,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.9,129.9,52,988\n"
+    "LOW001,03,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,19.1,129.4,58,982\n"
+    "LOW001,01,2026-07-01T00:00:00Z,2026-07-03T00:00:00Z,48,20.8,127.0,70,972\n"
+)
+
 
 def _free_port() -> int:
     with socket.socket() as probe:
@@ -33,8 +49,17 @@ def _free_port() -> int:
 
 @pytest.fixture
 def live_url(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(tmp_path, MEMBERS.read_bytes())
+
+
+@pytest.fixture
+def live_url_low(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(tmp_path, LOW_DENOM_CSV.encode())
+
+
+def _start_server(tmp_path: Path, csv: bytes) -> Iterator[str]:
     store = DatasetStore(tmp_path)
-    store.create(filename="ens.csv", content=MEMBERS.read_bytes(), kind="forecast")
+    store.create(filename="ens.csv", content=csv, kind="forecast")
     config = Config(create_app(store), host="127.0.0.1", port=_free_port(), log_level="warning")
     server = Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -98,3 +123,57 @@ def test_member_line_selection_switches_to_other_line(page, live_url: str) -> No
     page.wait_for_selector('path[data-highlight="02"]')
     assert page.locator('path[data-highlight="01"]').count() == 0  # 旧选中光晕已移除
     assert page.locator('path[data-highlight="02"]').count() == 1
+
+
+def _open_stats(page, live_url: str) -> None:
+    page.goto(live_url)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector('path[data-mean-track]')
+    page.wait_for_selector("[data-stats-circle]")
+    for chart_id in ("#radius-chart", "#stack-chart", "#pressure-chart"):
+        page.wait_for_selector(f"{chart_id} canvas")
+
+
+def test_stats_charts_render_with_p_default_100(page, live_url: str) -> None:
+    _open_stats(page, live_url)
+    assert page.locator("#p-select").input_value() == "100"
+    circle = page.locator("[data-stats-circle]")
+    assert circle.get_attribute("data-p") == "100"
+    assert circle.get_attribute("data-radius-km") is not None
+    assert page.locator("#stack-wrap").get_attribute("data-n-total") == "2"
+
+
+def test_p_change_requires_apply_confirmation(page, live_url: str) -> None:
+    _open_stats(page, live_url)
+    page.select_option("#p-select", "50")
+    page.wait_for_timeout(200)
+    # 未点"应用"：地图圆与半径图保持旧 p（100）
+    assert page.locator("[data-stats-circle]").get_attribute("data-p") == "100"
+    assert page.locator("#radius-wrap").get_attribute("data-p") == "100"
+    page.click("#p-apply")
+    page.wait_for_selector('[data-stats-circle][data-p="50"]')
+    assert page.locator("#radius-wrap").get_attribute("data-p") == "50"
+
+
+def test_stack_order_config_wiring(page, live_url: str) -> None:
+    _open_stats(page, live_url)
+    order = page.evaluate("window.STATS_CONFIG.stackBottomUp")
+    assert order[0] == "DISSIPATED" and order[-1] == "H5"
+    assert order[1] == "TD" and order[-2] == "H4"  # 已消散只邻 TD，H5 只邻 H4
+
+
+def test_single_member_mode_hides_stats(page, live_url: str) -> None:
+    _open_stats(page, live_url)
+    page.select_option("#member", "01")
+    page.wait_for_timeout(300)
+    for card in ("#stack-wrap", "#radius-wrap", "#pressure-wrap"):
+        assert "hidden" in (page.locator(card).get_attribute("class") or "")
+    assert page.locator('path[data-mean-track]').count() == 0
+
+
+def test_low_denominator_dashed_series(page, live_url_low: str) -> None:
+    page.goto(live_url_low)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("#radius-chart canvas")
+    # LOW001 lead 48 仅 1/4 成员在场（25% < 30%）→ 低分母时次数 = 1（虚线序列启用）
+    assert page.locator("#radius-wrap").get_attribute("data-low-count") == "1"
