@@ -7,6 +7,12 @@
   消散数 = 该轨迹成员总数 − 该时次在场数；
 - 概率半径 = 覆盖离平均位置最近 p% 成员的最小 haversine 半径；
 - 只取实际存在的时次（不插值、不外推）；不跨气旋/成员/起报时次混合统计。
+
+peak_profile（M8 终生峰值强度，口径见 docs/里程碑基线.md「M8」）：
+- 终生最大风速 = 成员全部行 wind 的 max；终生最低气压 = pressure 的 min；独立取极值、各报出现时效；
+- 出现过的成员一律以有限峰值参与统计（消散 = 行提前终止，峰值仍为有限值）；
+- 指标从未有有效值的成员为哨兵：不进该指标聚合（上中位值/算术平均），分母 n_valid 逐指标暴露；
+- 上中位值 = 升序第 floor(n/2)+1 个（偶数个成员取两个中位值中较大者）。
 """
 
 from __future__ import annotations
@@ -215,3 +221,130 @@ def ensemble_profile(
             )
         )
     return profiles
+
+
+# ---------- 成员终生峰值（M8：peak_profile） ----------
+
+
+@dataclass(frozen=True)
+class MemberPeak:
+    """单个成员的终生峰值；指标从未有有效值时该值为 None（哨兵，不进聚合）。"""
+
+    member: str
+    peak_wind: float | None
+    peak_wind_lead_h: float | None  # 峰值风速出现时效（并列取最早；lead 缺失时为 None）
+    peak_pressure: float | None
+    peak_pressure_lead_h: float | None
+
+
+@dataclass(frozen=True)
+class PeakMetricStats:
+    """单一指标的跨成员聚合（哨兵成员剔除；分母 n_valid 逐指标暴露）。"""
+
+    n_valid: int
+    median: float | None  # 上中位值：升序第 floor(n/2)+1 个
+    mean: float | None
+
+
+@dataclass(frozen=True)
+class PeakProfile:
+    """单一 (storm, init) 的成员终生峰值统计（整条预报轨迹口径，M8 基线）。"""
+
+    n_total: int
+    wind: PeakMetricStats
+    pressure: PeakMetricStats
+    members: list[MemberPeak]
+
+
+def _numeric_column(frame: pd.DataFrame, key: str) -> list[float | None]:
+    """一列 -> 逐行浮点值（列缺失或不可转换按缺失处理，缺失保持 None）。"""
+    values = _column_values(frame, key)
+    if not values:
+        return [None] * len(frame)
+    converted = _numeric_series(values)
+    return [None if _is_missing(v) else float(v) for v in converted.tolist()]
+
+
+def _ordered_members(unique: set[str]) -> list[str]:
+    """成员排序：可转 int 时按数值序，否则退回字典序（同 core.summary.sorted_members）。"""
+    try:
+        return sorted(unique, key=int)
+    except ValueError:
+        return sorted(unique)
+
+
+def _upper_median(values: list[float]) -> float | None:
+    """上中位值：升序第 floor(n/2)+1 个（偶数个时取两个中位值中较大者）。"""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def _extreme_with_earliest_lead(
+    pairs: list[tuple[float | None, float]], *, maximize: bool
+) -> tuple[float, float | None] | None:
+    """从 (lead, value) 对中取极值与最早出现时效（并列取最早；lead 缺失的行不参与并列比较）。"""
+    if not pairs:
+        return None
+    best = max(value for _, value in pairs) if maximize else min(value for _, value in pairs)
+    leads: list[float] = []
+    for lead, value in pairs:
+        if value == best and lead is not None and not _is_missing(lead):
+            leads.append(lead)
+    return best, min(leads) if leads else None
+
+
+def _peak_metric_stats(values: list[float | None]) -> PeakMetricStats:
+    valid = [value for value in values if value is not None]
+    return PeakMetricStats(
+        n_valid=len(valid),
+        median=_upper_median(valid),
+        mean=sum(valid) / len(valid) if valid else None,
+    )
+
+
+def peak_profile(frame: pd.DataFrame) -> PeakProfile:
+    """单一 (storm, init) 帧的成员终生峰值统计（整条轨迹口径，见模块 docstring 与 M8 基线）。
+
+    分母口径：n_total = 出现过的成员总数；消散成员（行提前终止）以有限峰值正常参与；
+    wind / pressure 从未有有效值的成员为哨兵，仅在该指标中被剔除。
+    """
+    _validate_single_track(frame)
+    member_keys = _member_keys(frame)
+    n_total = len(set(member_keys))
+
+    lead_column = _numeric_column(frame, "lead_h")
+    wind_column = _numeric_column(frame, "wind")
+    pressure_column = _numeric_column(frame, "pressure")
+
+    wind_pairs: dict[str, list[tuple[float | None, float]]] = {}
+    pressure_pairs: dict[str, list[tuple[float | None, float]]] = {}
+    for member, lead, wind, pressure in zip(
+        member_keys, lead_column, wind_column, pressure_column, strict=True
+    ):
+        if wind is not None:
+            wind_pairs.setdefault(member, []).append((lead, wind))
+        if pressure is not None:
+            pressure_pairs.setdefault(member, []).append((lead, pressure))
+
+    members: list[MemberPeak] = []
+    for member in _ordered_members(set(member_keys)):
+        wind_peak = _extreme_with_earliest_lead(wind_pairs.get(member, []), maximize=True)
+        pressure_peak = _extreme_with_earliest_lead(pressure_pairs.get(member, []), maximize=False)
+        members.append(
+            MemberPeak(
+                member=member,
+                peak_wind=None if wind_peak is None else wind_peak[0],
+                peak_wind_lead_h=None if wind_peak is None else wind_peak[1],
+                peak_pressure=None if pressure_peak is None else pressure_peak[0],
+                peak_pressure_lead_h=None if pressure_peak is None else pressure_peak[1],
+            )
+        )
+
+    return PeakProfile(
+        n_total=n_total,
+        wind=_peak_metric_stats([member.peak_wind for member in members]),
+        pressure=_peak_metric_stats([member.peak_pressure for member in members]),
+        members=members,
+    )
