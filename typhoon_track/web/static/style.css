@@ -132,3 +132,37 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 .impact-value { font-weight: 600; white-space: nowrap; }
 .muted-inline { font-weight: 400; font-size: .72rem; color: #667; margin-left: 4px; }
 .impact-error { color: #b91c1c; font-size: .8rem; margin: .4rem 0; }
+
+/* M8 终生峰值：右缘展开按钮 + 最右侧第四栏（默认隐藏，展开后与左/中/右三栏并列） */
+#peak-toggle {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  width: auto; margin: 0; padding: 12px 7px;
+  writing-mode: vertical-rl; letter-spacing: .25em;
+  border-radius: 6px 0 0 6px; z-index: 800;
+  box-shadow: -1px 1px 4px rgba(0, 0, 0, .25);
+}
+body.peaks-open #peak-toggle { display: none; }
+#peaks {
+  width: 320px; min-width: 260px; box-sizing: border-box;
+  background: #fff; border-left: 1px solid #d8d8d8; overflow-y: auto;
+}
+#peaks:not(.open) { display: none; }
+.peak-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid #e4e4e4;
+  position: sticky; top: 0; background: #fff; z-index: 5;
+}
+.peak-head h2 { font-size: .9rem; margin: 0; }
+.peak-head button { width: auto; margin: 0; padding: .25rem .7rem; font-size: .78rem; }
+.peak-aggregates { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: .8rem; }
+.peak-agg-row { display: flex; justify-content: space-between; gap: 10px; padding: .16rem 0; }
+.peak-agg-value { font-weight: 600; white-space: nowrap; }
+.peak-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.peak-table th, .peak-table td {
+  padding: .2rem 10px; text-align: right; white-space: nowrap;
+  border-bottom: 1px solid #f1f1f1;
+}
+.peak-table th { border-bottom: 1px solid #ddd; font-weight: 600; }
+.peak-table th:first-child, .peak-table td:first-child { text-align: left; }
+.peak-note { font-size: .7rem; color: #667; padding: 8px 12px 14px; margin: 0; }
+.peak-error { color: #b91c1c; font-size: .8rem; padding: 10px 12px; margin: 0; }
