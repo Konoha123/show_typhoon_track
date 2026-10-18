@@ -8,7 +8,7 @@ M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考
 M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
 M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用；
 M7c 位置概率半径图表暂隐藏：渲染停用但锚点与数据链路保留；
-M8 终生峰值第四栏：默认隐藏、右缘按钮展开/收起、聚合数与每成员峰值（哨兵"-"）；
+M8 终生峰值：第三栏聚合卡（强度分布图下方）+ 每成员明细第四栏（默认隐藏、卡内入口展开）；
 M7f 反经线（跨 180° 经线）绘制：成员线/均值轨迹/观测叠加走最短方向
 （zoom 无关形状比断言，合成数据 signed 口径 179.0 -> -178.1 跳变）。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
@@ -675,51 +675,84 @@ def test_antimeridian_observation_overlay_follows_shortest_path(
     assert ratio < 0.6, f"观测叠加存在横穿世界的路径段（最大步长/总跨度 = {ratio}）"
 
 
-# ---------- M8 终生峰值第四栏：默认隐藏、右缘按钮展开、哨兵显示"-" ----------
+# ---------- M8 终生峰值：第三栏聚合卡（强度分布下方）+ 每成员明细第四栏（默认隐藏） ----------
 
 
-def test_peak_panel_hidden_by_default_and_toggle_shows_values(page, live_url: str) -> None:
+def test_peak_card_in_charts_and_detail_panel_toggle(page, live_url: str) -> None:
     _open_stats(page, live_url)
-    # 默认隐藏：第四栏不在文档流中，右缘展开按钮可见
+    # 聚合卡位于第三栏、紧随强度等级分布卡之后，默认可见
+    wrap = page.locator("#peak-agg-wrap")
+    assert wrap.is_visible()
+    order = page.evaluate(
+        "[...document.querySelectorAll('#charts > .chart-card')].map(el => el.id)"
+    )
+    assert order.index("peak-agg-wrap") == order.index("stack-wrap") + 1
+    card_text = wrap.inner_text()
+    assert "终生峰值强度" in card_text
+    assert "终生最大风速（kt）" in card_text
+    assert "终生最低气压（hPa）" in card_text
+    # 明细第四栏默认隐藏；入口在聚合卡底部
     assert not page.locator("#peaks").is_visible()
-    assert page.locator("#peak-toggle").is_visible()
-    assert page.locator("#peak-toggle").get_attribute("aria-expanded") == "false"
-    page.click("#peak-toggle")
-    page.wait_for_selector("#peaks.open")
-    assert page.locator("#peaks").is_visible()
-    assert not page.locator("#peak-toggle").is_visible()  # 展开后右缘按钮退场
+    toggle = page.locator("#peak-agg-wrap #peak-toggle")
+    assert toggle.is_visible()
+    assert toggle.get_attribute("aria-expanded") == "false"
+    assert "每成员明细" in toggle.inner_text()
     # 合成样本 SYN202601：2 成员；风速 [60,70] 上中位 70 / 平均 65；气压 [972,980] 上中位 980 / 平均 976
-    body = page.locator("#peak-body")
-    page.wait_for_selector('#peak-body[data-peak-total="2"]')
-    assert float(body.get_attribute("data-peak-wind-median")) == pytest.approx(70.0)
-    assert float(body.get_attribute("data-peak-wind-mean")) == pytest.approx(65.0)
-    assert float(body.get_attribute("data-peak-pressure-median")) == pytest.approx(980.0)
-    assert float(body.get_attribute("data-peak-pressure-mean")) == pytest.approx(976.0)
-    # 每成员行：数值序 + 峰值与出现时效（01 风速 70@48h / 气压 972@48h）
+    agg = page.locator("#peak-agg-body")
+    assert agg.get_attribute("data-peak-total") == "2"
+    assert float(agg.get_attribute("data-peak-wind-median")) == pytest.approx(70.0)
+    assert float(agg.get_attribute("data-peak-wind-mean")) == pytest.approx(65.0)
+    assert float(agg.get_attribute("data-peak-pressure-median")) == pytest.approx(980.0)
+    assert float(agg.get_attribute("data-peak-pressure-mean")) == pytest.approx(976.0)
+    assert "65.0" in card_text and "976.0" in card_text  # 卡片文案含聚合值
+    # 展开明细栏：每成员行数值序 + 峰值与出现时效（01 风速 70@48h / 气压 972@48h）
+    toggle.click()
+    page.wait_for_selector("#peaks.open")
+    assert toggle.get_attribute("aria-expanded") == "true"
+    assert "收起明细" in toggle.inner_text()
     assert page.locator(".peak-table tbody tr").count() == 2
     row = page.locator('tr[data-member="01"]')
     assert row.locator("td[data-peak-wind]").inner_text().strip() == "70.0 @48h"
     assert row.locator("td[data-peak-pressure]").inner_text().strip() == "972.0 @48h"
     assert page.locator('tr[data-member="02"] td[data-peak-wind]').inner_text().strip() == "60.0 @48h"
-    # 收起：回到默认隐藏态
+    # 面板内「收起」复位：明细栏退场，入口文案还原
     page.click("#peak-close")
     page.wait_for_timeout(150)
     assert not page.locator("#peaks").is_visible()
-    assert page.locator("#peak-toggle").is_visible()
-    assert page.locator("#peak-toggle").get_attribute("aria-expanded") == "false"
+    assert toggle.get_attribute("aria-expanded") == "false"
+    assert "每成员明细" in toggle.inner_text()
+    # 入口双向切换：展开后再点一次入口即收起
+    toggle.click()
+    page.wait_for_selector("#peaks.open")
+    toggle.click()
+    page.wait_for_timeout(150)
+    assert not page.locator("#peaks").is_visible()
+    # 单成员模式：聚合卡随统计卡组隐藏，明细栏同步收起
+    toggle.click()
+    page.wait_for_selector("#peaks.open")
+    page.select_option("#member", "01")
+    page.wait_for_timeout(250)
+    assert "hidden" in (wrap.get_attribute("class") or "")
+    assert not page.locator("#peaks").is_visible()
+    # 回到全部成员：聚合卡恢复
+    page.select_option("#member", "ALL")
+    page.wait_for_timeout(250)
+    assert wrap.is_visible()
 
 
 def test_peak_panel_sentinel_member_shows_dash(page, live_url_peak: str) -> None:
     _open_stats(page, live_url_peak)
-    page.click("#peak-toggle")
-    page.wait_for_selector('#peak-body[data-peak-total="3"]')
+    page.locator("#peak-agg-wrap #peak-toggle").click()
+    page.wait_for_selector("#peaks.open")
+    page.wait_for_selector('tr[data-member="03"]')
     # 成员 03 风速整列缺失：该格显示"-"（不进风速聚合）；气压正常参与
     row = page.locator('tr[data-member="03"]')
     assert row.locator("td[data-peak-wind]").inner_text().strip() == "-"
     assert row.locator("td[data-peak-pressure]").inner_text().strip() == "1004.0 @24h"
     # 风速分母剔除哨兵（2/3）：[30,45] 上中位 45 / 平均 37.5；气压全员 [990,1002,1004] 正中 1002
-    body = page.locator("#peak-body")
-    assert float(body.get_attribute("data-peak-wind-median")) == pytest.approx(45.0)
-    assert float(body.get_attribute("data-peak-wind-mean")) == pytest.approx(37.5)
-    assert float(body.get_attribute("data-peak-pressure-median")) == pytest.approx(1002.0)
-    assert "2/3" in page.locator(".peak-agg-row").first.inner_text()
+    agg = page.locator("#peak-agg-body")
+    assert agg.get_attribute("data-peak-total") == "3"
+    assert float(agg.get_attribute("data-peak-wind-median")) == pytest.approx(45.0)
+    assert float(agg.get_attribute("data-peak-wind-mean")) == pytest.approx(37.5)
+    assert float(agg.get_attribute("data-peak-pressure-median")) == pytest.approx(1002.0)
+    assert "2/3" in page.locator("#peak-agg-wrap").inner_text()

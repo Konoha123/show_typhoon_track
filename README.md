@@ -88,7 +88,8 @@ python -m uvicorn typhoon_track.api.app:app --port 8000
 # 浏览器访问 http://127.0.0.1:8000 ：
 #   - 上传预报/观测 CSV（双入口）→ 选择气旋/起报/成员 → 地图渲染轨迹
 #   - 成员"全部"为意面图；单成员按强度着色点位；观测轨迹黑虚线叠加；时效滑块只取实际存在档位
-#   - 右缘「终生峰值」按钮展开第四栏：每成员终生最大风速/最低气压（含出现时效）与上中位/平均
+#   - 第三栏强度分布图下方「终生峰值强度」卡：每成员终生峰值的上中位/平均；
+#     卡内「每成员明细」按钮展开最右侧明细栏（成员、峰值风速/气压与出现时效）
 #   - 目标地点与影响概率的用法见下文「目标地点与影响概率使用说明」
 # 瓦片数据源在 config.toml 配置（确认记录见 docs/瓦片数据源确认_20261015.md）
 # REST 接口：POST /api/datasets（file+kind）、GET /api/datasets、GET /api/datasets/{id}(/tracks)
@@ -146,7 +147,7 @@ python -m compileall -q typhoon_track  # L0 语法编译
 ruff check --no-fix .                 # L1 静态缺陷
 pyright                               # L2 静态类型
 python -m pip check && deptry . && lint-imports   # L3 依赖与架构
-python -m pytest -q                   # L5 功能测试（233 项基线，含 Playwright UI E2E）
+python -m pytest -q                   # L5 功能测试（234 项基线，含 Playwright UI E2E）
 ```
 
 ## 路线图

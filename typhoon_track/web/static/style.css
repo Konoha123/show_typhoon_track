@@ -120,9 +120,9 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
   border-radius: 50%; border: 2.5px solid; margin-right: .3rem;
 }
 
-/* M6 影响概率卡片（右栏，高度自适应内容） */
-#impact-wrap { height: auto; min-height: 150px; max-height: 360px; overflow-y: auto; }
-#impact-wrap .impact-body { position: static; padding: 10px 14px; font-size: .85rem; }
+/* M6 影响概率卡片（右栏，高度自适应内容）；M8 终生峰值聚合卡同体系（强度分布图下方） */
+#impact-wrap, #peak-agg-wrap { height: auto; min-height: 150px; max-height: 360px; overflow-y: auto; }
+#impact-wrap .impact-body, #peak-agg-wrap .impact-body { position: static; padding: 10px 14px; font-size: .85rem; }
 .impact-body h3 { font-size: .85rem; margin: .4rem 0 .3rem; }
 .impact-row {
   display: flex; justify-content: space-between; gap: 8px;
@@ -133,15 +133,9 @@ input[type="range"] { width: 100%; margin-top: .3rem; }
 .muted-inline { font-weight: 400; font-size: .72rem; color: #667; margin-left: 4px; }
 .impact-error { color: #b91c1c; font-size: .8rem; margin: .4rem 0; }
 
-/* M8 终生峰值：右缘展开按钮 + 最右侧第四栏（默认隐藏，展开后与左/中/右三栏并列） */
-#peak-toggle {
-  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
-  width: auto; margin: 0; padding: 12px 7px;
-  writing-mode: vertical-rl; letter-spacing: .25em;
-  border-radius: 6px 0 0 6px; z-index: 800;
-  box-shadow: -1px 1px 4px rgba(0, 0, 0, .25);
-}
-body.peaks-open #peak-toggle { display: none; }
+/* M8 终生峰值：第三栏聚合卡（强度分布图下方）+ 每成员明细第四栏（默认隐藏，展开后与左/中/右三栏并列） */
+#peak-agg-foot { padding: 0 14px 10px; }
+#peak-agg-foot button { margin-top: .2rem; }
 #peaks {
   width: 320px; min-width: 260px; box-sizing: border-box;
   background: #fff; border-left: 1px solid #d8d8d8; overflow-y: auto;
@@ -154,9 +148,6 @@ body.peaks-open #peak-toggle { display: none; }
 }
 .peak-head h2 { font-size: .9rem; margin: 0; }
 .peak-head button { width: auto; margin: 0; padding: .25rem .7rem; font-size: .78rem; }
-.peak-aggregates { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: .8rem; }
-.peak-agg-row { display: flex; justify-content: space-between; gap: 10px; padding: .16rem 0; }
-.peak-agg-value { font-weight: 600; white-space: nowrap; }
 .peak-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 .peak-table th, .peak-table td {
   padding: .2rem 10px; text-align: right; white-space: nowrap;

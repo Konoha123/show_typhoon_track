@@ -2,7 +2,7 @@
  * 数据流：数据集选择 -> 拉取轨迹行 -> 客户端筛选（起报/成员/时效）-> Leaflet 渲染；
  *        (storm, init) 确定后拉取 ensemble-stats -> 均值轨迹/概率半径圆/统计图表；
  *        目标地点（预存/坐标/地图点选）确定后拉取 impact-stats -> 三级影响概率 + 最近接近；
- *        (storm, init) 同链拉取 peak-stats -> 最右侧第四栏每成员终生峰值（默认隐藏，右缘按钮展开）。
+ *        (storm, init) 同链拉取 peak-stats -> 最右侧第四栏每成员终生峰值（默认隐藏，第三栏顶部入口展开）。
  * 数据纪律：时效档位取实际存在的 lead_h，不插值；缺失保持缺失；不跨起报时次混合；
  *          集合统计口径见 window.STATS_CONFIG（单一事实来源 core.ensemble）。*/
 
@@ -627,6 +627,7 @@ function renderStatsCharts() {
     $(id).classList.toggle('hidden', !show);
   }
   $('radius-wrap').classList.add('hidden'); // M7c：保持隐藏
+  renderPeakAggregates(); // M8：聚合卡随统计卡组显隐（单成员模式同步隐藏并收起明细栏）
   if (!show) return;
   renderPressureChart();
   renderStackChart();
@@ -1035,18 +1036,20 @@ async function loadPlaces() {
   $('place-warnings').textContent = (state.places?.warnings ?? []).join('\n');
 }
 
-/* ---------- M8 终生峰值：每成员 wind max / pressure min + 上中位/平均（第四栏，默认隐藏） ---------- */
+/* ---------- M8 终生峰值：聚合卡（第三栏，强度分布图下方）+ 每成员明细第四栏（默认隐藏） ---------- */
 
 function setPeakPanelOpen(open) {
   state.peaksOpen = open;
   $('peaks').classList.toggle('open', open);
-  document.body.classList.toggle('peaks-open', open);
-  $('peak-toggle').setAttribute('aria-expanded', String(open));
+  // M8-R1：入口在第三栏聚合卡底部（双向切换），按钮文案随开合态切换
+  const toggle = $('peak-toggle');
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.textContent = open ? '收起明细 ◂' : '每成员明细 ▸';
 }
 
 async function loadPeaks() {
   state.peaks = null;
-  if (!state.fcId || !state.storm || !state.init) { renderPeakPanel(); return; }
+  if (!state.fcId || !state.storm || !state.init) { renderPeakViews(); return; }
   try {
     state.peaks = await api(`/api/datasets/${state.fcId}/peak-stats`, {
       storm: state.storm, init: state.init,
@@ -1054,7 +1057,7 @@ async function loadPeaks() {
   } catch (err) {
     state.peaks = { error: err.message }; // 如跨气旋/起报或观测数据集：显式展示原因，不回退
   }
-  renderPeakPanel();
+  renderPeakViews();
 }
 
 function peakCell(value, lead) {
@@ -1064,20 +1067,52 @@ function peakCell(value, lead) {
   return `${value.toFixed(1)}${at}`;
 }
 
-function renderPeakPanel() {
-  const body = $('peak-body');
-  const resetAnchors = () => {
-    for (const key of ('peak-total', 'peak-wind-median', 'peak-wind-mean',
-      'peak-pressure-median', 'peak-pressure-mean')) body.removeAttribute(`data-${key}`);
+function renderPeakViews() {
+  renderPeakAggregates();
+  renderPeakMemberPanel();
+}
+
+function _setPeakAggAnchors(data) {
+  const body = $('peak-agg-body');
+  const keys = ['data-peak-total', 'data-peak-wind-median', 'data-peak-wind-mean',
+    'data-peak-pressure-median', 'data-peak-pressure-mean'];
+  if (!data) {
+    for (const key of keys) body.removeAttribute(key);
+    return;
+  }
+  const values = {
+    'data-peak-total': String(data.n_total),
+    'data-peak-wind-median': data.wind.median,
+    'data-peak-wind-mean': data.wind.mean,
+    'data-peak-pressure-median': data.pressure.median,
+    'data-peak-pressure-mean': data.pressure.mean,
   };
-  if (!state.peaks) {
-    body.innerHTML = '<p class="muted">请先选择预报数据集、气旋与起报时次。</p>';
-    resetAnchors();
+  for (const key of keys) {
+    const value = values[key];
+    if (value == null) body.removeAttribute(key);
+    else body.setAttribute(key, String(value));
+  }
+}
+
+function renderPeakAggregates() {
+  const wrap = $('peak-agg-wrap');
+  const body = $('peak-agg-body');
+  const foot = $('peak-agg-foot');
+  // 与 pressure/stack 统计卡同组显隐（单成员模式隐藏；错误态仍显式展示原因）
+  const show = statsVisible() && state.peaks != null;
+  wrap.classList.toggle('hidden', !show);
+  if (!show) {
+    if (state.peaksOpen) setPeakPanelOpen(false); // 入口随卡隐藏，明细栏同步收起
+    body.innerHTML = '';
+    foot.classList.add('hidden');
+    _setPeakAggAnchors(null);
     return;
   }
   if (state.peaks.error) {
-    body.innerHTML = `<p class="peak-error">${escapeHtml(state.peaks.error)}</p>`;
-    resetAnchors();
+    body.innerHTML = '<h3>终生峰值强度（成员终生）</h3>' +
+      `<p class="peak-error">${escapeHtml(state.peaks.error)}</p>`;
+    foot.classList.add('hidden');
+    _setPeakAggAnchors(null);
     return;
   }
   const data = state.peaks;
@@ -1088,6 +1123,22 @@ function renderPeakPanel() {
     const mean = m.mean == null ? '-' : m.mean.toFixed(1);
     return `上中位 ${median} / 平均 ${mean}（${denominator}）`;
   };
+  body.innerHTML =
+    '<h3>终生峰值强度（成员终生）</h3>' +
+    `<div class="impact-row"><span>终生最大风速（kt）</span><span class="impact-value">${aggregate('wind')}</span></div>` +
+    `<div class="impact-row"><span>终生最低气压（hPa）</span><span class="impact-value">${aggregate('pressure')}</span></div>`;
+  foot.classList.remove('hidden');
+  _setPeakAggAnchors(data);
+}
+
+function renderPeakMemberPanel() {
+  const body = $('peak-body');
+  if (!state.peaks || state.peaks.error) {
+    body.innerHTML = '';
+    body.removeAttribute('data-peak-members');
+    return;
+  }
+  const data = state.peaks;
   const rows = data.members.map((m) =>
     `<tr data-member="${escapeHtml(m.member)}">` +
     `<td>${escapeHtml(m.member)}</td>` +
@@ -1095,20 +1146,12 @@ function renderPeakPanel() {
     `<td data-peak-pressure>${peakCell(m.peak_pressure, m.peak_pressure_lead_h)}</td></tr>`,
   ).join('');
   body.innerHTML =
-    '<div class="peak-aggregates">' +
-    `<div class="peak-agg-row"><span>终生最大风速（kt）</span><span class="peak-agg-value">${aggregate('wind')}</span></div>` +
-    `<div class="peak-agg-row"><span>终生最低气压（hPa）</span><span class="peak-agg-value">${aggregate('pressure')}</span></div>` +
-    '</div>' +
     '<table class="peak-table"><thead><tr>' +
     '<th>成员</th><th>峰值风速（kt）</th><th>峰值气压（hPa）</th>' +
     `</tr></thead><tbody>${rows}</tbody></table>` +
-    '<p class="peak-note">口径：整条预报轨迹；风速取最大、气压取最低（各自独立取极值并示出现时效）；' +
-    '聚合为成员上中位值与平均数；"-" 表示该成员该指标无有效值（不进聚合）。</p>';
-  body.setAttribute('data-peak-total', String(data.n_total));
-  body.setAttribute('data-peak-wind-median', data.wind.median == null ? '' : String(data.wind.median));
-  body.setAttribute('data-peak-wind-mean', data.wind.mean == null ? '' : String(data.wind.mean));
-  body.setAttribute('data-peak-pressure-median', data.pressure.median == null ? '' : String(data.pressure.median));
-  body.setAttribute('data-peak-pressure-mean', data.pressure.mean == null ? '' : String(data.pressure.mean));
+    '<p class="peak-note">口径：整条预报轨迹；风速取最大、气压取最低（各自独立取极值并示出现时效，并列取最早）；' +
+    '聚合（上中位/平均）见第三栏卡片；"-" 表示该成员该指标无有效值（不进聚合）。</p>';
+  body.setAttribute('data-peak-members', String(data.members.length));
 }
 
 /* 成员线高亮：不改原线颜色/粗细，叠加同色低透明度光晕层使其显眼；
@@ -1432,8 +1475,8 @@ $('lead').addEventListener('input', () => {
 });
 $('obs-dataset').addEventListener('change', onObsChange);
 
-/* M8 终生峰值第四栏：右缘按钮展开 / 面板内收起（默认隐藏，不占用三栏布局） */
-$('peak-toggle').addEventListener('click', () => setPeakPanelOpen(true));
+/* M8 终生峰值：聚合卡内「每成员明细」入口双向切换（展开/收起第四栏）；面板内「收起」等效 */
+$('peak-toggle').addEventListener('click', () => setPeakPanelOpen(!state.peaksOpen));
 $('peak-close').addEventListener('click', () => setPeakPanelOpen(false));
 
 /* M6 目标地点：预存地点下拉 / 坐标应用（Enter 同效）/ 地图点选开关 / 清除 */

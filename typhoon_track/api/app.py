@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 
 from typhoon_track.service.datasets import DatasetStore
@@ -15,6 +18,27 @@ from . import routes_api, routes_pages
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """静态资源显式 no-cache：强制浏览器每次再验证（ETag 命中回 304）。
+
+    M8-R1 根因修复：StaticFiles 默认不带 Cache-Control，浏览器对子资源启用
+    启发式缓存，更新 CSS/JS 后出现「新 HTML + 旧样式」组合（峰值栏常态展开、
+    按钮占栏、地图被挤为零宽）。本机单人使用，304 再验证代价可忽略。
+    类型经 fastapi 再导出/标准库别名书写，不直接依赖传递包 starlette（deptry DEP003）。
+    """
+
+    def file_response(
+        self,
+        full_path: os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: MutableMapping[str, Any],
+        status_code: int = 200,
+    ) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 @dataclass(frozen=True)
@@ -61,7 +85,7 @@ def create_app(
     app.state.store = store if store is not None else default_store()
     app.state.tile_config = load_tile_config()
     app.state.places_path = Path(places_path) if places_path is not None else default_places_path()
-    app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR / "static"), name="static")
     routes_api.register(app)
     routes_pages.register(app, templates_dir=WEB_DIR / "templates")
     return app

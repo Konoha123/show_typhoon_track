@@ -6,7 +6,8 @@
 <title>WNC 台风轨迹工作台</title>
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css">
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧） -->
+<link rel="stylesheet" href="/static/style.css?v=m8r1">
 </head>
 <body>
 <aside id="panel">
@@ -89,6 +90,13 @@
     <div class="chart-body" id="stack-chart"></div>
     <div class="readout" id="stack-readout"></div>
   </div>
+  <!-- M8 终生峰值聚合卡：位于强度等级分布图下方（高度自适应）；每成员明细为最右第四栏（默认隐藏，卡内入口展开） -->
+  <div class="chart-card hidden" id="peak-agg-wrap" data-stats-card>
+    <div class="impact-body" id="peak-agg-body"></div>
+    <div class="hidden" id="peak-agg-foot">
+      <button id="peak-toggle" type="button" aria-expanded="false" aria-controls="peaks">每成员明细 ▸</button>
+    </div>
+  </div>
   <!-- M7c：位置概率半径图表暂隐藏（使用反馈），数据链路与锚点保留，恢复时在 renderStatsCharts 重新启用 -->
   <div class="chart-card hidden" id="radius-wrap" data-stats-card>
     <div class="chart-body" id="radius-chart"></div>
@@ -98,20 +106,20 @@
     <div class="impact-body" id="impact-body"></div>
   </div>
 </aside>
-<!-- M8 终生峰值：最右侧第四栏（默认隐藏，右缘按钮展开） -->
-<aside id="peaks" aria-label="成员终生峰值（默认隐藏）">
+<!-- M8 终生峰值：每成员明细第四栏（默认隐藏，第三栏聚合卡内「每成员明细」入口展开） -->
+<aside id="peaks" aria-label="每成员终生峰值明细（默认隐藏）">
   <div class="peak-head">
-    <h2>终生峰值强度（成员终生）</h2>
+    <h2>每成员峰值明细</h2>
     <button id="peak-close" type="button" class="secondary">收起</button>
   </div>
   <div id="peak-body"></div>
 </aside>
-<button id="peak-toggle" type="button" aria-expanded="false" title="展开成员终生峰值列表">终生峰值</button>
 
 <script src="/static/vendor/leaflet.js"></script>
 <script src="/static/vendor/uPlot.iife.min.js"></script>
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
-<script type="module" src="/static/app.js"></script>
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧） -->
+<script type="module" src="/static/app.js?v=m8r1"></script>
 </body>
 </html>
