@@ -1,4 +1,4 @@
-"""REST 路由：CSV 双入口上传（kind=forecast|observation）、轨迹查询、集合统计与预存地点。
+"""REST 路由：CSV 双入口上传（kind=forecast|observation）、轨迹查询、集合统计、终生峰值统计与预存地点。
 
 输入输出结构由 .schemas 的 pydantic 契约定义，并同步进入 OpenAPI 文档。
 """
@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from typhoon_track.service.datasets import KINDS, DatasetStore
 from typhoon_track.service.places import load_places
-from typhoon_track.service.queries import ensemble_stats, impact_stats, track_rows
+from typhoon_track.service.queries import ensemble_stats, impact_stats, peak_stats, track_rows
 
 from .schemas import (
     CORE_WIND_LABEL,
@@ -23,6 +23,7 @@ from .schemas import (
     EnsembleStatsResponse,
     ImpactStatsResponse,
     ImpactThresholdStats,
+    PeakStatsResponse,
     Place,
     PlacesResponse,
     TrackFilters,
@@ -125,6 +126,29 @@ def register(app: FastAPI) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return EnsembleStatsResponse(
+            dataset_id=dataset_id, kind=parsed.kind, **payload
+        )
+
+    @app.get("/api/datasets/{dataset_id}/peak-stats", response_model=PeakStatsResponse)
+    def get_peak_stats(
+        dataset_id: str,
+        storm: Annotated[str | None, Query(description="气旋编号；多气旋数据集必须指定")] = None,
+        init: Annotated[str | None, Query(description="起报时次；多起报数据集必须指定")] = None,
+    ) -> PeakStatsResponse:
+        """成员终生峰值统计（M8：整条轨迹 wind max / pressure min，上中位值+平均，哨兵剔除）。"""
+        try:
+            parsed = _store().load(dataset_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"数据集不存在: {dataset_id}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if parsed.kind != "forecast":
+            raise HTTPException(status_code=400, detail="终生峰值统计仅适用于预报数据集（kind=forecast）")
+        try:
+            payload = peak_stats(parsed.frame, storm=storm, init=init)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return PeakStatsResponse(
             dataset_id=dataset_id, kind=parsed.kind, **payload
         )
 

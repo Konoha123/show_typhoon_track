@@ -153,6 +153,37 @@ class EnsembleStatsResponse(BaseModel):
     leads: list[EnsembleLeadStats]
 
 
+class PeakMetricStats(BaseModel):
+    """单一终生峰值指标的跨成员聚合（M8；哨兵成员剔除，分母 = n_valid）。"""
+
+    n_valid: int
+    median: float | None = None  # 上中位值：升序第 floor(n/2)+1 个；无有效成员时 null
+    mean: float | None = None
+
+
+class MemberPeak(BaseModel):
+    """单个成员的终生峰值；指标从未有有效值时为 null（前端显示"-"）。"""
+
+    member: str
+    peak_wind: float | None = None
+    peak_wind_lead_h: float | None = None
+    peak_pressure: float | None = None
+    peak_pressure_lead_h: float | None = None
+
+
+class PeakStatsResponse(BaseModel):
+    """终生峰值统计响应（整条预报轨迹口径，M8 基线；风速/气压独立取极值）。"""
+
+    dataset_id: str
+    kind: Kind
+    storm: str | None
+    init: str | None
+    n_total: int
+    wind: PeakMetricStats
+    pressure: PeakMetricStats
+    members: list[MemberPeak]
+
+
 IMPACT_THRESHOLD_LABELS: dict[int, str] = {
     34: "烈风（风速≥34 kt）",
     50: "暴风（风速≥50 kt）",

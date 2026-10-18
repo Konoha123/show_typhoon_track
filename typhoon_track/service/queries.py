@@ -1,4 +1,4 @@
-"""轨迹查询：筛选（filter_rows 语义）+ 经度双约定 + 行级 JSON 载荷；集合统计与影响统计编排。"""
+"""轨迹查询：筛选（filter_rows 语义）+ 经度双约定 + 行级 JSON 载荷；集合统计、影响统计与终生峰值统计编排。"""
 
 from __future__ import annotations
 
@@ -9,9 +9,11 @@ import pandas as pd
 
 from typhoon_track.core import (
     DEFAULT_P_VALUES,
+    PeakMetricStats,
     ensemble_profile,
     filter_rows,
     impact_profile,
+    peak_profile,
     signed_longitude,
 )
 
@@ -117,6 +119,47 @@ def impact_stats(
         },
         "closest": closest,
     }
+
+
+def peak_stats(
+    frame: pd.DataFrame,
+    *,
+    storm: str | None = None,
+    init: str | None = None,
+) -> dict[str, Any]:
+    """单一 (storm, init) 的成员终生峰值统计载荷（口径见 core.ensemble 与 M8 基线）。
+
+    终生最大风速 / 终生最低气压独立取极值、各报出现时效（并列取最早）；
+    聚合 = 上中位值 + 算术平均；指标全缺成员为哨兵、逐指标剔除并独立暴露分母；
+    storm/init 不唯一时由 core 拒绝混合。
+    """
+    rows = filter_rows(frame, storm=storm, init=init)
+    profile = peak_profile(rows)
+    return {
+        "storm": storm,
+        "init": init,
+        "n_total": profile.n_total,
+        "wind": _peak_metric_payload(profile.wind),
+        "pressure": _peak_metric_payload(profile.pressure),
+        "members": [
+            _jsonable_record(
+                {
+                    "member": peak.member,
+                    "peak_wind": peak.peak_wind,
+                    "peak_wind_lead_h": peak.peak_wind_lead_h,
+                    "peak_pressure": peak.peak_pressure,
+                    "peak_pressure_lead_h": peak.peak_pressure_lead_h,
+                }
+            )
+            for peak in profile.members
+        ],
+    }
+
+
+def _peak_metric_payload(stats: PeakMetricStats) -> dict[str, Any]:
+    return _jsonable_record(
+        {"n_valid": stats.n_valid, "median": stats.median, "mean": stats.mean}
+    )
 
 
 def _lead_payload(profile: Any) -> dict[str, Any]:
