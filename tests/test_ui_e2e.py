@@ -7,7 +7,9 @@ M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考
 （含缺风圈列的显式不可用提示）；
 M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
 M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用；
-M7c 位置概率半径图表暂隐藏：渲染停用但锚点与数据链路保留。
+M7c 位置概率半径图表暂隐藏：渲染停用但锚点与数据链路保留；
+M7f 反经线（跨 180° 经线）绘制：成员线/均值轨迹/观测叠加走最短方向
+（zoom 无关形状比断言，合成数据 signed 口径 179.0 -> -178.1 跳变）。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
@@ -68,6 +70,33 @@ IMPACT_CSV = (
 
 PLACES_CSV = "name,lat,lon,note\n那霸,26.2124,127.6809,冲绳\n"
 
+# 跨 180° 经线（反经线）合成用例：0–360° 约定 lon 176.5 -> 184.5，signed 口径在
+# lead 24->48 出现 179.0 -> -178.1 跳变（Leaflet 折线无反经线感知，需组内展开）。
+# 轨迹取转向（recurve）形态带明显曲率：保证任意视图缩放下顶点都不被 smoothFactor
+# 简化丢弃（近似直线的轨迹在贴合视图下会塌缩成 2 顶点，形状比探针失效）
+AMERIDIAN_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa\n"
+    "AMER001,01,2026-10-14T00:00:00Z,2026-10-14T00:00:00Z,0,16.0,176.5,45,992\n"
+    "AMER001,01,2026-10-14T00:00:00Z,2026-10-15T00:00:00Z,24,20.0,179.0,55,984\n"
+    "AMER001,01,2026-10-14T00:00:00Z,2026-10-16T00:00:00Z,48,22.5,181.9,65,975\n"
+    "AMER001,01,2026-10-14T00:00:00Z,2026-10-17T00:00:00Z,72,22.8,184.5,75,965\n"
+    "AMER001,02,2026-10-14T00:00:00Z,2026-10-14T00:00:00Z,0,15.4,175.8,40,996\n"
+    "AMER001,02,2026-10-14T00:00:00Z,2026-10-15T00:00:00Z,24,19.4,178.3,50,988\n"
+    "AMER001,02,2026-10-14T00:00:00Z,2026-10-16T00:00:00Z,48,21.9,181.2,60,979\n"
+    "AMER001,02,2026-10-14T00:00:00Z,2026-10-17T00:00:00Z,72,22.3,184.0,70,969\n"
+)
+
+# 同气旋观测参考轨迹（ensemble_member 列对观测无语义，保留表头一致便于复用）
+AMERIDIAN_OBS_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa\n"
+    "AMER001,00,2026-10-14T00:00:00Z,2026-10-14T00:00:00Z,0,15.7,176.1,43,994\n"
+    "AMER001,00,2026-10-14T00:00:00Z,2026-10-15T00:00:00Z,24,19.7,178.6,52,986\n"
+    "AMER001,00,2026-10-14T00:00:00Z,2026-10-16T00:00:00Z,48,22.2,181.5,63,977\n"
+    "AMER001,00,2026-10-14T00:00:00Z,2026-10-17T00:00:00Z,72,22.6,184.2,73,967\n"
+)
+
 
 def _free_port() -> int:
     with socket.socket() as probe:
@@ -90,9 +119,23 @@ def live_url_impact(tmp_path: Path) -> Iterator[str]:
     yield from _start_server(tmp_path, IMPACT_CSV.encode(), places_csv=PLACES_CSV.encode())
 
 
-def _start_server(tmp_path: Path, csv: bytes, places_csv: bytes | None = None) -> Iterator[str]:
+@pytest.fixture
+def live_url_antimeridian(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(
+        tmp_path, AMERIDIAN_CSV.encode(), obs_csv=AMERIDIAN_OBS_CSV.encode(),
+    )
+
+
+def _start_server(
+    tmp_path: Path,
+    csv: bytes,
+    places_csv: bytes | None = None,
+    obs_csv: bytes | None = None,
+) -> Iterator[str]:
     store = DatasetStore(tmp_path)
     store.create(filename="ens.csv", content=csv, kind="forecast")
+    if obs_csv is not None:
+        store.create(filename="obs.csv", content=obs_csv, kind="observation")
     places_path = None
     if places_csv is not None:
         places_path = tmp_path / "places" / "places.csv"
@@ -552,3 +595,64 @@ def test_upload_button_disabled_while_parsing(page, live_url: str) -> None:
     # 上传链路完成：预报数据集下拉增至 2 项，且状态栏被后续行数文案接管（导入成功已被覆盖，属既有行为）
     assert page.locator("#fc-dataset option").count() == 2
     assert "行 / 成员" in page.locator("#status").inner_text()
+
+
+# ---------- 反经线（跨 180° 经线）绘制：连线走最短方向，不横穿整幅地图 ----------
+
+
+def _max_path_wrap_ratio(page) -> float:
+    """地图全部折线路径的「相邻顶点最大步长 / 总跨度」（zoom 无关的形状比）。
+
+    未展开 ±180 跳变时，跨经线段一步即几乎横跨整个 bbox（比值 ≈ 1.0，
+    实测修复前 ≈ 0.993，占世界宽 99.3%）；正常逐时次推进的轨迹相邻步长
+    远小于总跨度（本用例 ≈ 0.34）。只解析纯 M/L 折线（圆类 path 含 a/m 弧
+    命令，数值无步长语义，跳过）；引线（data-mean-leader，两点连线）天然
+    比值为 1，排除。
+    """
+    return page.evaluate(
+        """() => {
+          const paths = [...document.querySelectorAll('#map svg path[d]:not([data-mean-leader])')];
+          let worst = 0;
+          for (const p of paths) {
+            const d = p.getAttribute('d');
+            if (!/^M[-\\d.,\\s]+(?:L[-\\d.,\\s]+)*$/.test(d)) continue;
+            const nums = (d.match(/-?\\d+(?:\\.\\d+)?/g) || []).map(Number);
+            const xs = [];
+            for (let i = 0; i + 1 < nums.length; i += 2) xs.push(nums[i]);
+            if (xs.length < 2) continue;
+            let maxStep = 0;
+            for (let i = 1; i < xs.length; i += 1) {
+              maxStep = Math.max(maxStep, Math.abs(xs[i] - xs[i - 1]));
+            }
+            const span = Math.max(...xs) - Math.min(...xs);
+            if (span > 0) worst = Math.max(worst, maxStep / span);
+          }
+          return worst;
+        }"""
+    )
+
+
+def test_antimeridian_member_and_mean_lines_follow_shortest_path(
+    page, live_url_antimeridian: str,
+) -> None:
+    # 修复前：179.0 -> -178.1 的 signed 跳变被 Leaflet 连成经 0° 绕行 ~356° 的横穿线，
+    # fitBounds 同步被拉到近全球尺度（复现与修复记录见 docs/反经线绘制缺陷修复验收记录_20261018.md）
+    page.goto(live_url_antimeridian)
+    page.wait_for_selector('path[data-member="01"]')
+    page.wait_for_selector('path[data-mean-track]')
+    page.wait_for_timeout(600)  # 等 fitBounds 视图与路径几何稳定
+    ratio = _max_path_wrap_ratio(page)
+    assert ratio < 0.6, f"存在横穿世界的路径段（最大步长/总跨度 = {ratio}）"
+
+
+def test_antimeridian_observation_overlay_follows_shortest_path(
+    page, live_url_antimeridian: str,
+) -> None:
+    # 观测叠加（虚线）与观测点同样按组展开：不因叠加引入横穿线
+    page.goto(live_url_antimeridian)
+    page.wait_for_selector('path[data-member="01"]')
+    page.select_option("#obs-dataset", index=1)  # 唯一观测数据集
+    page.wait_for_selector('#map svg path[stroke-dasharray]')
+    page.wait_for_timeout(600)
+    ratio = _max_path_wrap_ratio(page)
+    assert ratio < 0.6, f"观测叠加存在横穿世界的路径段（最大步长/总跨度 = {ratio}）"

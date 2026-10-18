@@ -147,6 +147,30 @@ function toSignedLon(lon) {
   return ((lon % 360) + 540) % 360 - 180;
 }
 
+function nearestLon(lon, refLon) {
+  // 与 refLon 最近的等价经度（lon + k·360）：跨 180° 经线绘制的展开基础
+  let delta = (lon - refLon) % 360;
+  if (delta > 180) delta -= 360;
+  if (delta <= -180) delta += 360;
+  return refLon + delta;
+}
+
+function unwrapCoords(coords) {
+  // 组内顶点经度展开为连续序列（相邻差 ≤ 180°，如 179.2 -> 181.8 而非 -178.2）：
+  // Leaflet 折线在投影平面内连直线、无反经线感知，±180 两侧的原始经度会被连成经 0°
+  // 绕行 ~357° 的横穿线（占世界宽 99%+）；展开后超出 ±180 的经度由 Leaflet 投影到
+  // 相邻世界副本，连线即沿最短方向跨越。组内点/线/包围盒必须共用同一份展开结果，
+  // 避免线画在一个世界副本而点落在另一个副本。
+  const out = [];
+  let ref = null;
+  for (const [lat, lon] of coords) {
+    const value = ref == null ? lon : nearestLon(lon, ref);
+    out.push([lat, value]);
+    ref = value;
+  }
+  return out;
+}
+
 function popupText(row, groupKey) {
   const lines = [groupKey ? `气旋/成员: ${groupKey}` : ''];
   if (row.member != null) lines.push(`成员: ${row.member}`);
@@ -661,21 +685,20 @@ function setSelectedKeyLead(lead) {
   applyKeySelectionStyles();
 }
 
-function labelAnchorNeighbors(drawnLeads, index) {
-  // 引线偏移方向：取轨迹相邻时次作切线（首尾点退化为自身与邻点）
-  const prev = drawnLeads[Math.max(0, index - 1)];
-  const next = drawnLeads[Math.min(drawnLeads.length - 1, index + 1)];
-  return [prev, next];
+function neighborPoints(points, index) {
+  // 引线偏移方向：取轨迹相邻时次坐标作切线（首尾点退化为自身与邻点）
+  return [points[Math.max(0, index - 1)], points[Math.min(points.length - 1, index + 1)]];
 }
 
 function offsetLatLng(center, prev, next, side) {
   // 沿轨迹法线偏移固定像素。用 map.project/unproject 纯投影计算（世界像素=CSS 像素），
   // 不经 latLngToContainerPoint（后者包含 pane transform，zoom 动画收尾窗口内读取会得到
-  // 带残留的坐标，曾致锚点地理点系统性漂移）
+  // 带残留的坐标，曾致锚点地理点系统性漂移）；prev/next 为均值轨迹的展开坐标
+  // （跨 180° 时与线同处一个世界副本，切向不反向）
   const zoom = map.getZoom();
   const c = map.project(center, zoom);
-  const p = map.project([prev.mean_lat, toSignedLon(prev.mean_lon)], zoom);
-  const n = map.project([next.mean_lat, toSignedLon(next.mean_lon)], zoom);
+  const p = map.project(prev, zoom);
+  const n = map.project(next, zoom);
   const dx = n.x - p.x;
   const dy = n.y - p.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -699,10 +722,12 @@ function destinationPoint(lat, lon, bearingDeg, distKm) {
 
 function geoCirclePoints(center, radiusKm, segments = 64) {
   // 概率圆用多边形逼近（polyline 家族）：Leaflet SVG 对 circle/circleMarker 的 zoom 几何
-  // 重算存在写空缺陷（d="M0 0"），多边形路径不受影响
+  // 重算存在写空缺陷（d="M0 0"），多边形路径不受影响；顶点经度相对圆心展开
+  // （destinationPoint 已归一回 ±180，跨经线圆环不展开会断裂成横穿世界的多边形）
   const points = [];
   for (let i = 0; i <= segments; i += 1) {
-    points.push(destinationPoint(center[0], center[1], (360 / segments) * i, radiusKm));
+    const [lat, lon] = destinationPoint(center[0], center[1], (360 / segments) * i, radiusKm);
+    points.push([lat, nearestLon(lon, center[1])]);
   }
   return points;
 }
@@ -718,6 +743,7 @@ function renderStatsLayer() {
   const redrawables = []; // 渲染完成后统一强制重绘（Leaflet SVG 异步几何写入在动画窗口内可能缺失）
   const allLeads = state.stats.leads.filter((l) => l.mean_lat != null && l.mean_lon != null);
   const centerOf = (l) => [l.mean_lat, toSignedLon(l.mean_lon)];
+  const allCenters = unwrapCoords(allLeads.map(centerOf)); // 跨 180°：均值轨迹组内展开，点/线/圆共用
 
   // mean 线截断：自首时次起连续绘制，遇到低分母时次（消散比例 > 1-30% 阈值）即停止延伸
   let cutIndex = allLeads.length;
@@ -725,9 +751,10 @@ function renderStatsLayer() {
     if (allLeads[i].low_denominator) { cutIndex = i; break; }
   }
   const drawnLeads = allLeads.slice(0, cutIndex);
+  const drawnCenters = allCenters.slice(0, cutIndex); // 展开是前缀封闭的：与 drawnLeads 逐位对应
   // 统计图层除关键标签外一律不拦截指针事件（interactive:false），避免遮挡 M4 交互
-  if (drawnLeads.length >= 2) {
-    const track = L.polyline(drawnLeads.map(centerOf), {
+  if (drawnCenters.length >= 2) {
+    const track = L.polyline(drawnCenters, {
       color: MEAN_COLOR, weight: 3.5, opacity: 0.9, interactive: false,
       smoothFactor: 0, noClip: true,
     }).addTo(statsLayer);
@@ -737,23 +764,25 @@ function renderStatsLayer() {
       track._path?.setAttribute('data-mean-cut', String(allLeads[cutIndex].lead_h));
     }
   }
-  for (const entry of drawnLeads) {
+  drawnLeads.forEach((entry, i) => {
     // 时次点用 divIcon（HTML 定位）而非 circleMarker：Leaflet SVG 的 circleMarker 几何
     // 在 zoom 重算时会被写成 M0 0（同容器 polyline 正常，属其更新路径缺陷），HTML 定位不受影响
-    const dot = L.marker(centerOf(entry), {
+    const dot = L.marker(drawnCenters[i], {
       icon: L.divIcon({ className: 'mean-dot', html: '<span class="mean-dot-tag"></span>', iconSize: null }),
       interactive: false, keyboard: false,
     }).addTo(statsLayer);
     dot.getElement()?.setAttribute('data-mean-dot', String(entry.lead_h)); // E2E/调试锚点（引线终点）
     meanDotsByKey.set(entry.lead_h, dot);
-  }
+  });
 
   // 滑块当前时次（高亮样式，低分母时次同样绘制，数据不删仅视觉区分）
   const entry = state.stats.leads.find((l) => l.lead_h === state.leadCut)
     ?? allLeads[allLeads.length - 1];
   const currentLead = entry?.lead_h;
+  const entryIndex = allLeads.indexOf(entry);
+  const entryCenter = entryIndex >= 0 ? allCenters[entryIndex] : (entry ? centerOf(entry) : null);
   if (entry && entry.mean_lat != null) {
-    const marker = L.marker(centerOf(entry), {
+    const marker = L.marker(entryCenter, {
       icon: L.divIcon({
         className: 'mean-dot',
         html: '<span class="mean-dot-tag mean-dot-center"></span>',
@@ -764,7 +793,7 @@ function renderStatsLayer() {
     marker.getElement()?.setAttribute('data-mean-center', String(entry.lead_h));
     const radiusKm = entry.radius_km[state.pApplied];
     if (radiusKm != null) {
-      const circle = L.polygon(geoCirclePoints(centerOf(entry), radiusKm), {
+      const circle = L.polygon(geoCirclePoints(entryCenter, radiusKm), {
         color: '#2563eb', weight: 1.5, opacity: 0.9,
         fill: false, dashArray: '6 5', interactive: false,
         smoothFactor: 0, noClip: true, renderer: statsCircleRenderer,
@@ -782,7 +811,7 @@ function renderStatsLayer() {
     if (l.lead_h % 24 !== 0 || l.lead_h === currentLead) continue;
     const radiusKm = l.radius_km[state.pApplied];
     if (radiusKm == null) continue;
-    const center = centerOf(l);
+    const center = drawnCenters[i]; // 展开坐标：圆/标签/引线与均值线同处一个世界副本
     const circle = L.polygon(geoCirclePoints(center, radiusKm), {
       ...KEY_CIRCLE_BASE, interactive: false, smoothFactor: 0, noClip: true,
       renderer: statsCircleRenderer,
@@ -790,7 +819,7 @@ function renderStatsLayer() {
     keyCircles.set(l.lead_h, circle);
 
     // 引线标签：偏移点在轨迹法线方向，关键点奇偶交替两侧，减少与轨迹/彼此重叠
-    const [prev, next] = labelAnchorNeighbors(drawnLeads, i);
+    const [prev, next] = neighborPoints(drawnCenters, i);
     const side = keyIndex % 2 === 0 ? 1 : -1;
     keyIndex += 1;
     const anchor = offsetLatLng(center, prev, next, side);
@@ -822,7 +851,7 @@ function renderStatsLayer() {
   if (!entry || entry.mean_lat == null || (entry.radius_km[state.pApplied] ?? null) == null) {
     $('map').removeAttribute('data-current-circle');
   }
-  lastStatsLayout = { drawnLeads, currentLead };
+  lastStatsLayout = { drawnLeads, drawnCenters, currentLead };
 }
 
 function updateStatsAnchors() {
@@ -836,8 +865,8 @@ function updateStatsAnchors() {
     if (l.lead_h % 24 !== 0 || l.lead_h === lastStatsLayout.currentLead) continue;
     const entry = keyLabels.get(l.lead_h);
     if (!entry) continue;
-    const center = [l.mean_lat, toSignedLon(l.mean_lon)];
-    const [prev, next] = labelAnchorNeighbors(lastStatsLayout.drawnLeads, i);
+    const center = lastStatsLayout.drawnCenters[i]; // 与初次渲染同源的展开坐标
+    const [prev, next] = neighborPoints(lastStatsLayout.drawnCenters, i);
     const anchor = offsetLatLng(center, prev, next, keyIndex % 2 === 0 ? 1 : -1);
     keyIndex += 1;
     entry.marker.setLatLng(anchor);
@@ -1066,7 +1095,11 @@ function render() {
   let colorIndex = 0;
   for (const [key, group] of groups) {
     const memberKey = group[0].member ?? '—';
-    const coords = group.map(pointCoords).filter(Boolean);
+    // 组内坐标统一展开（跨 180° 经线走最短方向）：行与坐标配对，线/点/包围盒共用同一份
+    const rowCoords = group
+      .map((row) => [row, pointCoords(row)])
+      .filter(([, coord]) => coord != null);
+    const coords = unwrapCoords(rowCoords.map(([, coord]) => coord));
     if (coords.length >= 2) {
       const line = L.polyline(coords, {
         color: singleMember ? '#374151' : memberColor(colorIndex),
@@ -1097,9 +1130,8 @@ function render() {
       }
     }
     if (singleMember) {
-      for (const row of group) {
-        const c = pointCoords(row);
-        if (!c) continue;
+      rowCoords.forEach(([row], i) => {
+        const c = coords[i]; // 与线同源的展开坐标（同一世界副本）
         bounds.push(c);
         const marker = L.circleMarker(c, {
           radius: 4.5, color: '#333', weight: 0.8,
@@ -1107,7 +1139,7 @@ function render() {
         }).bindPopup(popupText(row, key)).addTo(forecastLayer);
         markersByKey.set(`${row.member ?? '—'}#${row.lead_h}`, marker);
         marker.on('mouseover', () => pointToChart(row.lead_h));
-      }
+      });
     } else {
       for (const c of coords) bounds.push(c);
     }
@@ -1117,18 +1149,20 @@ function render() {
   if (state.obsId) {
     const obsGroups = groupBy(state.obsRows, (r) => `${r.storm ?? r.name ?? '?'}`);
     for (const [key, group] of obsGroups) {
-      const coords = group.map(pointCoords).filter(Boolean);
-      if (coords.length >= 2) {
-        L.polyline(coords, { color: '#111111', weight: 2, dashArray: '6,6' }).addTo(obsLayer);
+      // 观测轨迹同样按组展开（跨 180° 最短方向），线/点/包围盒共用同一份坐标
+      const obsRowCoords = group
+        .map((row) => [row, pointCoords(row)])
+        .filter(([, coord]) => coord != null);
+      const obsCoords = unwrapCoords(obsRowCoords.map(([, coord]) => coord));
+      if (obsCoords.length >= 2) {
+        L.polyline(obsCoords, { color: '#111111', weight: 2, dashArray: '6,6' }).addTo(obsLayer);
       }
-      for (const row of group) {
-        const c = pointCoords(row);
-        if (!c) continue;
-        bounds.push(c);
-        L.circleMarker(c, {
+      obsRowCoords.forEach(([row], i) => {
+        bounds.push(obsCoords[i]);
+        L.circleMarker(obsCoords[i], {
           radius: 3, color: '#111111', weight: 1, fillColor: '#111111', fillOpacity: 0.9,
         }).bindPopup(popupText(row, `观测: ${key}`)).addTo(obsLayer);
-      }
+      });
     }
   }
 
