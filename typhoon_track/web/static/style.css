@@ -25,6 +25,8 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 button:disabled:hover { background: #2563eb; }
 button.secondary:disabled:hover { background: #64748b; }
 input[type="range"] { width: 100%; margin-top: .3rem; }
+/* M5d-R12：概率圆时次滑块禁用态（单成员/统计未就绪：可见但不可交互） */
+input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
 
 /* 中栏：地图独占剩余宽度 */
 #stage { flex: 1; display: flex; min-width: 0; }

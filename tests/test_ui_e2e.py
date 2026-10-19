@@ -2,7 +2,8 @@
 
 覆盖成员线持久选中状态机：点线选中、鼠标离开保持、点空白取消、点其它线切换；
 M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆叠层级次序、
-低分母虚线、单成员模式隐藏统计卡；
+低分母虚线、单成员模式隐藏统计卡；M5d-R12 时效滑块解耦：概率圆时次查看器
+（默认 0 档、不截断成员线/图表、单成员模式禁用）；
 M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
 （含缺风圈列的显式不可用提示）；
 M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
@@ -288,22 +289,22 @@ def test_low_denominator_dashed_series(page, live_url_low: str) -> None:
 
 def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
     # members 样本 leads=0/24/48 无低分母：mean 线不截断（M5d-R11 滑块域保持全程 max=2）；
-    # 关键圆=0/24（48 为滑块当前时次）
+    # M5d-R12 起滑块默认 0 档 → 关键圆=24/48（0 为滑块当前时次，已高亮故排除）
     _open_stats(page, live_url)
     assert page.locator('path[data-mean-cut]').count() == 0
     assert page.locator("#lead").get_attribute("max") == "2"  # 无低分母：不截断
     key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
-    assert key_leads == {"0", "24"}
+    assert key_leads == {"24", "48"}
     labels = page.locator("[data-mean-label]")
     assert labels.count() == 2
     texts = {labels.nth(i).inner_text() for i in range(2)}
-    assert any(t.startswith("0h·") for t in texts) and any(t.startswith("24h·") for t in texts)
+    assert any(t.startswith("24h·") for t in texts) and any(t.startswith("48h·") for t in texts)
 
 
 def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
-    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h；M5d-R11 起时效滑块同步截断于
-    # 首个低分母时次前（档位 [0,24,48] → max 指针=1 即 24h），当前时次圆=24h（以当前圆
-    # 呈现而非关键圆，故关键圆仅 0）——不再出现以末位消散成员中心绘制的圆
+    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h；M5d-R11 起时效滑块域同步截断于
+    # 首个低分母时次前（档位 [0,24,48] → max 指针=1 即 24h）；M5d-R12 起滑块默认 0 档，
+    # 当前时次圆=0h（以当前圆呈现而非关键圆，故关键圆仅 24）
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector("#stack-chart canvas")
@@ -312,12 +313,62 @@ def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
     assert cut.count() == 1
     assert cut.first.get_attribute("data-mean-cut") == "48"
     key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
-    assert key_leads == {"0"}
+    assert key_leads == {"24"}
     lead = page.locator("#lead")
     assert lead.get_attribute("max") == "1"
-    assert lead.input_value() == "1"
+    assert lead.input_value() == "0"
+    assert page.locator("#lead-label").inner_text().strip() == "0 h"
+    assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "0"
+
+
+def test_circle_lead_slider_defaults_to_first_step(page, live_url: str) -> None:
+    # M5d-R12：滑块语义=概率圆时次查看器——打开即 0 档（不再是尾端"全部"），可交互
+    _open_stats(page, live_url)
+    lead = page.locator("#lead")
+    assert lead.input_value() == "0"
+    assert lead.is_enabled()
+    assert page.locator("#lead-label").inner_text().strip() == "0 h"
+    assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "0"
+    # 左栏标签措辞（概率圆时次，不再含"显示 <="）
+    assert "概率圆时次" in page.locator("label[for='lead']").inner_text()
+    assert "显示" not in page.locator("label[for='lead']").inner_text()
+
+
+def test_slider_decoupled_from_member_lines(page, live_url: str) -> None:
+    """M5d-R12 解耦本体：拖动概率圆时次滑块只移动当前圆/关键圆，成员线绘制不受影响。
+
+    members 样本 leads=0/24/48：滑块 0→1（24h）下——
+    - 成员线 path d 保持全程三顶点不变（旧"显示 <=" 语义下会截断为 0-24 两顶点）；
+    - 当前圆心 0→24、关键圆 {24,48}→{0,48}（当前时次从关键圆序列中换出/换入）。
+    """
+    _open_stats(page, live_url)
+    member_paths = page.locator("path[data-member]")
+    assert member_paths.count() >= 2
+    d_before = [member_paths.nth(i).get_attribute("d") for i in range(member_paths.count())]
+    assert all(d and d.count("L") == 2 for d in d_before)  # 全程 3 顶点（两段折线）
+
+    page.fill("#lead", "1")
+    page.wait_for_function(
+        "document.querySelector('[data-mean-center]')?.getAttribute('data-mean-center') === '24'",
+    )
+    d_after = [member_paths.nth(i).get_attribute("d") for i in range(member_paths.count())]
+    assert d_after == d_before  # 成员线与滑块解耦：几何不随查看时次变化
     assert page.locator("#lead-label").inner_text().strip() == "24 h"
-    assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "24"
+    key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
+    assert key_leads == {"0", "48"}
+
+
+def test_lead_slider_disabled_in_single_member_mode(page, live_url: str) -> None:
+    # M5d-R12：单成员模式统计层不显示——滑块保留栏位但禁用；切回集合视图恢复
+    _open_stats(page, live_url)
+    assert page.locator("#lead").is_enabled()
+    page.select_option("#member", "01")
+    page.wait_for_timeout(300)
+    assert page.locator("#lead").is_disabled()
+    page.select_option("#member", "ALL")
+    page.wait_for_selector("#map[data-current-circle]")
+    assert page.locator("#lead").is_enabled()
+    assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "0"
 
 
 def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
@@ -348,7 +399,7 @@ def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
 
 
 def test_key_label_selection_highlights_circle(page, live_url: str) -> None:
-    # 引线存在（0h/24h 两个关键标签各一条）
+    # 引线存在（M5d-R12 默认当前 0h → 关键标签 24h/48h 各一条）
     _open_stats(page, live_url)
     page.wait_for_selector('[data-mean-label="24"] .mean-label-tag')
     assert page.locator('path[data-mean-leader]').count() == 2
@@ -358,10 +409,10 @@ def test_key_label_selection_highlights_circle(page, live_url: str) -> None:
     klass = page.locator('[data-mean-label="24"] .mean-label-tag').get_attribute("class") or ""
     assert "selected" in klass
     # 点击另一标签切换选中
-    page.click('[data-mean-label="0"] .mean-label-tag')
-    page.wait_for_function("document.getElementById('map').getAttribute('data-key-selected') === '0'")
+    page.click('[data-mean-label="48"] .mean-label-tag')
+    page.wait_for_function("document.getElementById('map').getAttribute('data-key-selected') === '48'")
     # 再点同一标签取消
-    page.click('[data-mean-label="0"] .mean-label-tag')
+    page.click('[data-mean-label="48"] .mean-label-tag')
     page.wait_for_timeout(200)
     assert page.locator("#map").get_attribute("data-key-selected") is None
     # 选中后点击地图空白海域取消（与成员选中同型）

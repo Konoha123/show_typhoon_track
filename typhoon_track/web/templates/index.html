@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧） -->
-<link rel="stylesheet" href="/static/style.css?v=m8r1">
+<link rel="stylesheet" href="/static/style.css?v=m5r12">
 </head>
 <body>
 <aside id="panel">
@@ -41,8 +41,9 @@
     <select id="init"></select>
     <label for="member">集合成员</label>
     <select id="member"></select>
-    <label for="lead">预报时效：显示 ≤ <span id="lead-label">全部</span></label>
-    <input type="range" id="lead" min="0" max="0" step="1" value="0">
+    <!-- M5d-R12：滑块语义=概率圆时次查看器（默认 0 档；不截断成员线/图表；单成员或统计未就绪时禁用） -->
+    <label for="lead">概率圆时次：<span id="lead-label">—</span></label>
+    <input type="range" id="lead" min="0" max="0" step="1" value="0" disabled>
   </section>
 
   <section>
@@ -120,6 +121,6 @@
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
 <!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧） -->
-<script type="module" src="/static/app.js?v=m5r11"></script>
+<script type="module" src="/static/app.js?v=m5r12"></script>
 </body>
 </html>

@@ -26,7 +26,7 @@ const MEMBER_COLORS = [
 
 const state = {
   datasets: [], fcId: null, obsId: null,
-  storm: null, init: null, member: 'ALL', leadCut: null,
+  storm: null, init: null, member: 'ALL', circleLead: null, // M5d-R12：概率圆查看时次（不再截断成员线/图表）
   fcRows: [], obsRows: [], leadSteps: [],
   selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
   stats: null, pSelected: '100', pApplied: '100', selectedKeyLead: null,
@@ -248,7 +248,7 @@ function chartSize() {
 function renderChart(rows) {
   destroyChart();
   if (!rows.length || typeof uPlot === 'undefined') return;
-  // x 轴档位 = 实际存在的 lead_h（不插值）；数据已与地图同截断于 leadCut
+  // x 轴档位 = 实际存在的 lead_h（不插值）；M5d-R12 起全程绘制，不随时效滑块截断
   const leads = [...new Set(rows.map((r) => r.lead_h).filter((v) => v != null))]
     .sort((a, b) => a - b);
   if (!leads.length) return;
@@ -779,9 +779,10 @@ function renderStatsLayer() {
   });
 
   // 滑块当前时次（高亮样式；M5d-R11 起滑块已截断于首个低分母时次，选取与兜底均在
-  // 截断内（drawnLeads）进行，与 mean 线 cutIndex 口径一致，不再落到尾部消散成员中心）
-  const entry = drawnLeads.find((l) => l.lead_h === state.leadCut)
-    ?? drawnLeads[drawnLeads.length - 1];
+  // 截断内（drawnLeads）进行，与 mean 线 cutIndex 口径一致，不落到尾部消散成员中心；
+  // M5d-R12 起滑块仅为概率圆查看器，兜底取首个有效时次（与默认 0 档一致））
+  const entry = drawnLeads.find((l) => l.lead_h === state.circleLead)
+    ?? drawnLeads[0];
   const currentLead = entry?.lead_h;
   const entryIndex = allLeads.indexOf(entry);
   const entryCenter = entryIndex >= 0 ? allCenters[entryIndex] : (entry ? centerOf(entry) : null);
@@ -1208,8 +1209,8 @@ function updateStatusBar() {
 
 /* ---------- 渲染 ---------- */
 
-// M5d-R11：集合视图下预报时效滑块截断于首个低分母时次（口径与 renderStatsLayer 的
-// mean 线 cutIndex 一致），消除以尾部消散成员中心绘制的"当前时次"概率圆；
+// M5d-R11：集合视图下滑块域截断于首个低分母时次（口径与 renderStatsLayer 的
+// mean 线 cutIndex 一致），概率圆不可落到以尾部消散成员中心绘制的时次；
 // 单成员模式/统计未就绪或失败/无低分母时次 → 不截断（滑块保持全程）
 function leadMaxIndex() {
   const steps = state.leadSteps;
@@ -1225,39 +1226,37 @@ function leadMaxIndex() {
   return maxIdx;
 }
 
-// 滑块域与 state.leadCut 的单向同步：render() 每次先于行过滤调用；仅钳制实际生效
-// （leadCut 变化）时改写 #lead-label，无截断路径保持既有「全部」初始文案与拖动行为
+// 滑块域与 state.circleLead 的单向同步：render() 每次先于图层重建调用。
+// M5d-R12：滑块语义 = 概率圆时次查看器——默认 0 档、不截断成员线与图表；
+// 仅统计层可见（集合视图且统计就绪）时可交互，越界/失效选取钳制回域内
 function syncLeadSlider() {
   const steps = state.leadSteps;
   const slider = $('lead');
   const maxIdx = leadMaxIndex();
   slider.max = String(Math.max(0, maxIdx));
+  slider.disabled = !statsVisible(); // 单成员/统计未就绪或失败：可见但禁用（M5d-R12）
   if (!steps.length) {
-    if (state.leadCut != null) {
-      state.leadCut = null;
-      $('lead-label').textContent = '全部';
-    }
+    state.circleLead = null;
+    $('lead-label').textContent = '—';
     return;
   }
-  let idx = steps.indexOf(state.leadCut);
-  if (idx < 0 || idx > maxIdx) idx = maxIdx;
-  const clamped = state.leadCut !== steps[idx];
+  let idx = steps.indexOf(state.circleLead);
+  if (idx < 0 || idx > maxIdx) idx = Math.max(0, maxIdx); // maxIdx<0（极端全低分母）钳回 0 档
   slider.value = String(idx);
-  state.leadCut = steps[idx];
-  if (clamped) $('lead-label').textContent = `${state.leadCut} h`;
+  state.circleLead = steps[idx];
+  $('lead-label').textContent = `${state.circleLead} h`;
 }
 
 function currentForecastRows() {
   return state.fcRows.filter((row) => {
     if (state.init != null && row.init !== state.init) return false;
     if (state.member !== 'ALL' && row.member !== state.member) return false;
-    if (state.leadCut != null && row.lead_h != null && row.lead_h > state.leadCut + 1e-9) return false;
-    return true;
+    return true; // M5d-R12：不再按 lead_h 截断——成员线/图表始终全程
   });
 }
 
 function render() {
-  syncLeadSlider(); // M5d-R11：行过滤/图层重建前先钳制滑块域与 leadCut（低分母截断）
+  syncLeadSlider(); // M5d-R12：图层重建前同步滑块域/禁用态与 circleLead（低分母截断钳制）
   forecastLayer.clearLayers();
   obsLayer.clearLayers();
   markersByKey.clear();
@@ -1438,12 +1437,10 @@ async function onStormChange() {
 
   const steps = sortedUnique(state.fcRows, 'lead_h', true);
   state.leadSteps = steps;
-  const slider = $('lead');
-  slider.max = String(Math.max(0, steps.length - 1));
-  slider.value = slider.max;
-  state.leadCut = steps.length ? steps[steps.length - 1] : null;
-  $('lead-label').textContent = '全部';
-  await loadStats(); // (storm, init) 就绪后拉取集合统计并渲染
+  state.circleLead = steps.length ? steps[0] : null; // M5d-R12：默认 0 档（首个实际存在时次）
+  $('lead').value = '0';
+  $('lead-label').textContent = steps.length ? `${steps[0]} h` : '—';
+  await loadStats(); // (storm, init) 就绪后拉取集合统计并渲染（syncLeadSlider 再行钳制域与禁用态）
 }
 
 async function onObsChange() {
@@ -1518,9 +1515,9 @@ $('member').addEventListener('change', () => {
 });
 $('lead').addEventListener('input', () => {
   const idx = Number($('lead').value);
-  state.leadCut = state.leadSteps.length ? state.leadSteps[idx] : null;
-  $('lead-label').textContent = state.leadCut == null ? '全部' : `${state.leadCut} h`;
-  render();
+  state.circleLead = state.leadSteps.length ? state.leadSteps[idx] : null;
+  $('lead-label').textContent = state.circleLead == null ? '—' : `${state.circleLead} h`;
+  render(); // M5d-R12：仅移动"当前时次"概率圆（成员线/图表全程，互不影响）
 });
 $('obs-dataset').addEventListener('change', onObsChange);
 
