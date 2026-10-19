@@ -778,9 +778,10 @@ function renderStatsLayer() {
     meanDotsByKey.set(entry.lead_h, dot);
   });
 
-  // 滑块当前时次（高亮样式，低分母时次同样绘制，数据不删仅视觉区分）
-  const entry = state.stats.leads.find((l) => l.lead_h === state.leadCut)
-    ?? allLeads[allLeads.length - 1];
+  // 滑块当前时次（高亮样式；M5d-R11 起滑块已截断于首个低分母时次，选取与兜底均在
+  // 截断内（drawnLeads）进行，与 mean 线 cutIndex 口径一致，不再落到尾部消散成员中心）
+  const entry = drawnLeads.find((l) => l.lead_h === state.leadCut)
+    ?? drawnLeads[drawnLeads.length - 1];
   const currentLead = entry?.lead_h;
   const entryIndex = allLeads.indexOf(entry);
   const entryCenter = entryIndex >= 0 ? allCenters[entryIndex] : (entry ? centerOf(entry) : null);
@@ -1207,6 +1208,45 @@ function updateStatusBar() {
 
 /* ---------- 渲染 ---------- */
 
+// M5d-R11：集合视图下预报时效滑块截断于首个低分母时次（口径与 renderStatsLayer 的
+// mean 线 cutIndex 一致），消除以尾部消散成员中心绘制的"当前时次"概率圆；
+// 单成员模式/统计未就绪或失败/无低分母时次 → 不截断（滑块保持全程）
+function leadMaxIndex() {
+  const steps = state.leadSteps;
+  if (!steps.length) return -1;
+  let maxIdx = steps.length - 1;
+  if (statsVisible()) {
+    const lowLeads = state.stats.leads.filter((l) => l.low_denominator).map((l) => l.lead_h);
+    if (lowLeads.length) {
+      const cut = Math.min(...lowLeads);
+      while (maxIdx >= 0 && steps[maxIdx] >= cut) maxIdx -= 1;
+    }
+  }
+  return maxIdx;
+}
+
+// 滑块域与 state.leadCut 的单向同步：render() 每次先于行过滤调用；仅钳制实际生效
+// （leadCut 变化）时改写 #lead-label，无截断路径保持既有「全部」初始文案与拖动行为
+function syncLeadSlider() {
+  const steps = state.leadSteps;
+  const slider = $('lead');
+  const maxIdx = leadMaxIndex();
+  slider.max = String(Math.max(0, maxIdx));
+  if (!steps.length) {
+    if (state.leadCut != null) {
+      state.leadCut = null;
+      $('lead-label').textContent = '全部';
+    }
+    return;
+  }
+  let idx = steps.indexOf(state.leadCut);
+  if (idx < 0 || idx > maxIdx) idx = maxIdx;
+  const clamped = state.leadCut !== steps[idx];
+  slider.value = String(idx);
+  state.leadCut = steps[idx];
+  if (clamped) $('lead-label').textContent = `${state.leadCut} h`;
+}
+
 function currentForecastRows() {
   return state.fcRows.filter((row) => {
     if (state.init != null && row.init !== state.init) return false;
@@ -1217,6 +1257,7 @@ function currentForecastRows() {
 }
 
 function render() {
+  syncLeadSlider(); // M5d-R11：行过滤/图层重建前先钳制滑块域与 leadCut（低分母截断）
   forecastLayer.clearLayers();
   obsLayer.clearLayers();
   markersByKey.clear();

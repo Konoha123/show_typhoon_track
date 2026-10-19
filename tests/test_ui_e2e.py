@@ -287,9 +287,11 @@ def test_low_denominator_dashed_series(page, live_url_low: str) -> None:
 
 
 def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
-    # members 样本 leads=0/24/48 无低分母：mean 线不截断；关键圆=0/24（48 为滑块当前时次）
+    # members 样本 leads=0/24/48 无低分母：mean 线不截断（M5d-R11 滑块域保持全程 max=2）；
+    # 关键圆=0/24（48 为滑块当前时次）
     _open_stats(page, live_url)
     assert page.locator('path[data-mean-cut]').count() == 0
+    assert page.locator("#lead").get_attribute("max") == "2"  # 无低分母：不截断
     key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
     assert key_leads == {"0", "24"}
     labels = page.locator("[data-mean-label]")
@@ -299,15 +301,23 @@ def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
 
 
 def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
-    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h，关键圆止于截断点（0/24）
+    # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h；M5d-R11 起时效滑块同步截断于
+    # 首个低分母时次前（档位 [0,24,48] → max 指针=1 即 24h），当前时次圆=24h（以当前圆
+    # 呈现而非关键圆，故关键圆仅 0）——不再出现以末位消散成员中心绘制的圆
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector("#stack-chart canvas")
+    page.wait_for_selector("#map[data-current-circle]")
     cut = page.locator('path[data-mean-cut]')
     assert cut.count() == 1
     assert cut.first.get_attribute("data-mean-cut") == "48"
     key_leads = set((page.locator("#map").get_attribute("data-key-leads") or "").split(","))
-    assert key_leads == {"0", "24"}
+    assert key_leads == {"0"}
+    lead = page.locator("#lead")
+    assert lead.get_attribute("max") == "1"
+    assert lead.input_value() == "1"
+    assert page.locator("#lead-label").inner_text().strip() == "24 h"
+    assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "24"
 
 
 def test_stack_chart_bands_render_distinct_colors(page, live_url: str) -> None:
