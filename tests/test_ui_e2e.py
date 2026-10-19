@@ -715,6 +715,13 @@ def test_peak_card_in_charts_and_detail_panel_toggle(page, live_url: str) -> Non
     assert row.locator("td[data-peak-wind]").inner_text().strip() == "70.0 @48h"
     assert row.locator("td[data-peak-pressure]").inner_text().strip() == "972.0 @48h"
     assert page.locator('tr[data-member="02"] td[data-peak-wind]').inner_text().strip() == "60.0 @48h"
+    # M8-R2：风速峰值按图例强度等级原色着色（70kt→H1 #ffd166、60kt→TS #66c2a5），
+    # 数值与时效标签同一 span；气压列与哨兵不着色（哨兵在 live_url_peak 用例覆盖）
+    assert "color: #ffd166" in (row.locator("td[data-peak-wind] span.peak-wind").get_attribute("style") or "")
+    assert "color: #66c2a5" in (
+        page.locator('tr[data-member="02"] td[data-peak-wind] span.peak-wind').get_attribute("style") or ""
+    )
+    assert row.locator("td[data-peak-pressure] span.peak-wind").count() == 0
     # 面板内「收起」复位：明细栏退场，入口文案还原
     page.click("#peak-close")
     page.wait_for_timeout(150)
@@ -749,6 +756,14 @@ def test_peak_panel_sentinel_member_shows_dash(page, live_url_peak: str) -> None
     row = page.locator('tr[data-member="03"]')
     assert row.locator("td[data-peak-wind]").inner_text().strip() == "-"
     assert row.locator("td[data-peak-pressure]").inner_text().strip() == "1004.0 @24h"
+    # M8-R2 着色：01 峰值 45kt→TS #66c2a5、02 峰值 30kt→TD #6fb7e0；哨兵"-"无 span 不着色
+    assert "color: #66c2a5" in (
+        page.locator('tr[data-member="01"] td[data-peak-wind] span.peak-wind').get_attribute("style") or ""
+    )
+    assert "color: #6fb7e0" in (
+        page.locator('tr[data-member="02"] td[data-peak-wind] span.peak-wind').get_attribute("style") or ""
+    )
+    assert row.locator("td[data-peak-wind] span.peak-wind").count() == 0
     # 风速分母剔除哨兵（2/3）：[30,45] 上中位 45 / 平均 37.5；气压全员 [990,1002,1004] 正中 1002
     agg = page.locator("#peak-agg-body")
     assert agg.get_attribute("data-peak-total") == "3"

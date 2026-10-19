@@ -1067,6 +1067,14 @@ function peakCell(value, lead) {
   return `${value.toFixed(1)}${at}`;
 }
 
+// M8-R2：风速峰值按图例强度等级原色着色（数值与出现时效标签同色；哨兵 "-" 不着色；
+// 气压与强度反相关，不套用风速配色）。class peak-wind 仅作选择器锚点，无样式规则
+function peakWindCell(value, lead) {
+  if (value == null) return '-';
+  const at = lead == null ? '' : ` @${lead}h`;
+  return `<span class="peak-wind" style="color: ${windColor(value)}">${value.toFixed(1)}${at}</span>`;
+}
+
 function renderPeakViews() {
   renderPeakAggregates();
   renderPeakMemberPanel();
@@ -1142,7 +1150,7 @@ function renderPeakMemberPanel() {
   const rows = data.members.map((m) =>
     `<tr data-member="${escapeHtml(m.member)}">` +
     `<td>${escapeHtml(m.member)}</td>` +
-    `<td data-peak-wind>${peakCell(m.peak_wind, m.peak_wind_lead_h)}</td>` +
+    `<td data-peak-wind>${peakWindCell(m.peak_wind, m.peak_wind_lead_h)}</td>` +
     `<td data-peak-pressure>${peakCell(m.peak_pressure, m.peak_pressure_lead_h)}</td></tr>`,
   ).join('');
   body.innerHTML =
