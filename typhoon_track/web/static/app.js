@@ -7,6 +7,13 @@
  *          集合统计口径见 window.STATS_CONFIG（单一事实来源 core.ensemble）。*/
 
 const STATS = window.STATS_CONFIG;
+/* M9 洋区码表（单源 core.basin，页面注入）：地点侧 8 码（复选框数据源，固定顺序）
+ * + 气旋侧粗码 SH（cycloneOnly，仅「当前气旋洋区」提示标签） */
+const BASIN_CATALOG = window.BASIN_CATALOG ?? [];
+const BASIN_LABELS = new Map(BASIN_CATALOG.map((b) => [b.code, b.label]));
+function basinLabelOf(code) {
+  return BASIN_LABELS.get(code) ?? code; // 未知码原样返回（同 core.basin_label 语义）
+}
 const WIND_SCALE = STATS.categories.map((c) => ({
   min: c.minKt == null ? -Infinity : c.minKt,
   label: c.label,
@@ -31,6 +38,7 @@ const state = {
   selectedMember: null, lastRowsCount: 0, lastGroupCount: 0,
   stats: null, pSelected: '100', pApplied: '100', selectedKeyLead: null,
   target: null, places: null, impact: null,
+  basinsChecked: null, // M9：勾选的洋区码集合（Set）；null=未初始化，首次渲染默认全选
   peaks: null, peaksOpen: false, // M8：终生峰值载荷与第四栏开合态（默认隐藏）
 };
 
@@ -1029,13 +1037,69 @@ async function loadPlaces() {
   } catch (err) {
     state.places = { available: false, places: [], warnings: [`预存地点获取失败：${err.message}`] };
   }
-  const list = state.places?.places ?? [];
-  const options = [{
-    value: '',
-    label: list.length ? '— 选择预存地点 —' : '— 无预存地点（填坐标或地图点选）—',
-  }].concat(list.map((p) => ({ value: p.name, label: p.note ? `${p.name}（${p.note}）` : p.name })));
-  fillSelect($('place-select'), options, false);
+  renderBasinFilters();
   $('place-warnings').textContent = (state.places?.warnings ?? []).join('\n');
+}
+
+/* M9：当前气旋洋区提示（「当前气旋洋区：WP 西北太平洋」；无洋区时隐藏，不臆造） */
+function updateStormBasinHint(basin) {
+  const hint = $('storm-basin-hint');
+  if (!basin) {
+    hint.classList.add('hidden');
+    hint.textContent = '';
+    return;
+  }
+  hint.textContent = `当前气旋洋区：${basinLabelOf(basin)}`;
+  hint.classList.remove('hidden');
+}
+
+/* M9 洋区筛选：复选框组（地点侧 8 码固定顺序，默认全选；无对应地点的洋区禁用置灰）。
+ * 勾选变化只过滤地点下拉，不跟随气旋；热重载后保持勾选集合（码表单源不漂移）。 */
+function renderBasinFilters() {
+  const box = $('basin-filters');
+  const places = state.places?.places ?? [];
+  const counts = new Map();
+  for (const p of places) counts.set(p.basin, (counts.get(p.basin) ?? 0) + 1);
+  if (!state.basinsChecked) {
+    state.basinsChecked = new Set(BASIN_CATALOG.filter((b) => !b.cycloneOnly).map((b) => b.code));
+  }
+  box.innerHTML = '';
+  for (const basin of BASIN_CATALOG) {
+    if (basin.cycloneOnly) continue; // SH 等气旋侧粗码不进复选框
+    const count = counts.get(basin.code) ?? 0;
+    const label = document.createElement('label');
+    label.className = 'basin-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = basin.code;
+    checkbox.checked = state.basinsChecked.has(basin.code);
+    checkbox.disabled = count === 0;
+    checkbox.dataset.basin = basin.code;
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) state.basinsChecked.add(basin.code);
+      else state.basinsChecked.delete(basin.code);
+      fillPlaceSelect();
+    });
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(` ${basin.label}`));
+    box.appendChild(label);
+  }
+  fillPlaceSelect();
+}
+
+/* 按勾选洋区过滤地点下拉；当前已选地点若仍可见则保持选中 */
+function fillPlaceSelect() {
+  const all = state.places?.places ?? [];
+  const list = all.filter((p) => state.basinsChecked?.has(p.basin) ?? true);
+  const previous = $('place-select').value;
+  const placeholder = !all.length
+    ? '— 无预存地点（填坐标或地图点选）—'
+    : (list.length ? '— 选择预存地点 —' : '— 无勾选洋区的地点 —');
+  const options = [{ value: '', label: placeholder }].concat(
+    list.map((p) => ({ value: p.name, label: p.note ? `${p.name}（${p.note}）` : p.name })),
+  );
+  fillSelect($('place-select'), options, false);
+  if (previous && options.some((o) => o.value === previous)) $('place-select').value = previous;
 }
 
 /* ---------- M8 终生峰值：聚合卡（第三栏，强度分布图下方）+ 每成员明细第四栏（默认隐藏） ---------- */
@@ -1413,12 +1477,19 @@ async function loadStormOptions() {
 
 async function onStormChange() {
   state.storm = $('storm').value || null;
-  if (!state.fcId || !state.storm) { state.fcRows = []; render(); return; }
+  if (!state.fcId || !state.storm) {
+    state.fcRows = [];
+    updateStormBasinHint(null); // M9：未选气旋时隐藏提示
+    render();
+    return;
+  }
   try {
     const body = await api(`/api/datasets/${state.fcId}/tracks`, { storm: state.storm }, '预报轨迹查询中…');
     state.fcRows = body.rows;
+    updateStormBasinHint(body.storm_basin ?? null); // M9：track_id 前缀直映（未识别为 null → 隐藏）
   } catch (err) {
     state.fcRows = [];
+    updateStormBasinHint(null);
     setStatus(`预报轨迹获取失败：${err.message}`, true);
     return;
   }

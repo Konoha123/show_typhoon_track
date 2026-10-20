@@ -70,7 +70,12 @@ IMPACT_CSV = (
     "0,0,0,0,0,0,0,0,0,0,0,0\n"
 )
 
-PLACES_CSV = "name,lat,lon,basin,note\n那霸,26.2124,127.6809,WP,冲绳\n"
+# M9：含 basin 列；两地点分属 WP/EP（覆盖洋区过滤与"仍可见保持选中"）
+PLACES_CSV = (
+    "name,lat,lon,basin,note\n"
+    "那霸,26.2124,127.6809,WP,冲绳\n"
+    "檀香山,21.3069,-157.8583,EP,夏威夷\n"
+)
 
 # M8 终生峰值：3 成员，成员 03 风速整列缺失（哨兵显示"-"），气压正常
 PEAK_SENTINEL_CSV = (
@@ -594,6 +599,60 @@ def test_places_dropdown_selects_target(page, live_url_impact: str) -> None:
     text = page.locator("#impact-body").inner_text()
     assert "那霸" in text  # 目标行显示预存地名
     assert text.count("0.0%") == 4  # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）
+
+
+# ---------- M9 预存地点洋区筛选（复选框组默认全选、不跟随气旋；无地点洋区置灰） ----------
+
+
+def test_basin_filters_default_all_checked_and_greyed(page, live_url_impact: str) -> None:
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector(".basin-check input")
+    boxes = page.locator(".basin-check input")
+    # 固定 8 码顺序（NA/EP/CP/WP/NI/SI/SP/SA，单源 core.basin 注入）
+    codes = page.evaluate(
+        "[...document.querySelectorAll('.basin-check input')].map((el) => el.value)"
+    )
+    assert codes == ["NA", "EP", "CP", "WP", "NI", "SI", "SP", "SA"]
+    assert page.locator(".basin-check").count() == 8
+    # 默认全选；有地点的洋区（WP/EP）可勾选，其余禁用置灰
+    for i in range(8):
+        assert boxes.nth(i).is_checked()
+    assert boxes.nth(1).is_enabled() and boxes.nth(3).is_enabled()  # EP / WP
+    for i in (0, 2, 4, 5, 6, 7):
+        assert boxes.nth(i).is_disabled()
+    # 标签格式「代码 中文名」
+    labels = page.locator(".basin-check").all_inner_texts()
+    assert any(t.strip().startswith("WP 西北太平洋") for t in labels)
+    # 默认全选 → 下拉含全部地点
+    options = page.locator("#place-select option").all_inner_texts()
+    assert any("那霸" in t for t in options) and any("檀香山" in t for t in options)
+    # 合成前缀 SYN 未识别 → 当前气旋洋区提示隐藏
+    assert "hidden" in (page.locator("#storm-basin-hint").get_attribute("class") or "")
+
+
+def test_basin_filters_uncheck_hides_places_keeps_visible_selection(
+    page, live_url_impact: str
+) -> None:
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector(".basin-check input")
+    page.select_option("#place-select", "那霸")
+    # 取消 EP：那霸（WP）仍可见 → 保持选中
+    page.locator(".basin-check input[value='EP']").uncheck()
+    assert page.locator("#place-select").input_value() == "那霸"
+    options = page.locator("#place-select option").all_inner_texts()
+    assert any("那霸" in t for t in options)
+    assert not any("檀香山" in t for t in options)
+    # 再取消 WP：无勾选洋区地点 → 下拉清空显示占位
+    page.locator(".basin-check input[value='WP']").uncheck()
+    assert page.locator("#place-select").input_value() == ""
+    assert "无勾选洋区的地点" in page.locator("#place-select option").first.inner_text()
+    # 勾回 WP：那霸重新可见（未自动选中，占位恢复"选择预存地点"）
+    page.locator(".basin-check input[value='WP']").check()
+    options = page.locator("#place-select option").all_inner_texts()
+    assert any("那霸" in t for t in options)
+    assert "选择预存地点" in page.locator("#place-select option").first.inner_text()
 
 
 def test_invalid_target_coordinates_rejected(page, live_url_impact: str) -> None:

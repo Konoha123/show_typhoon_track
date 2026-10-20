@@ -2,6 +2,7 @@
 
 M5：注入集合统计配置（强度分级/堆叠层级/p 档位/低分母阈值），单一事实来源为
 core.ensemble 常量，前端不再硬编码（口径见 docs/M5口径验证记录_20261016.md）。
+M9：注入洋区码表（地点侧 8 码复选框 + 气旋侧 SH 粗码提示标签），单源 core.basin。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from typhoon_track.core import (
     UNKNOWN_KEY,
     WIND_CATEGORIES,
 )
+from typhoon_track.core.basin import BASIN_NAMES, BASIN_ORDER
 
 
 def stats_config_json() -> str:
@@ -49,6 +51,20 @@ def stats_config_json() -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def basin_catalog_json() -> str:
+    """由 core.basin 常量生成注入页面的洋区码表（M9）。
+
+    地点侧 8 码（BASIN_ORDER 顺序，复选框数据源）+ 气旋侧粗码 SH（cycloneOnly，
+    仅用于「当前气旋洋区」提示标签，不进复选框）；label 为「代码 中文名」格式。
+    """
+    entries = [
+        {"code": code, "label": f"{code} {BASIN_NAMES[code]}", "cycloneOnly": False}
+        for code in BASIN_ORDER
+    ]
+    entries.append({"code": "SH", "label": f"SH {BASIN_NAMES['SH']}", "cycloneOnly": True})
+    return json.dumps(entries, ensure_ascii=False)
+
+
 def register(app: FastAPI, *, templates_dir: Path) -> None:
     templates = Jinja2Templates(directory=str(templates_dir))
 
@@ -67,5 +83,10 @@ def register(app: FastAPI, *, templates_dir: Path) -> None:
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"datasets": store.list(), "tile_config": tile_json, "stats_config": stats_config_json()},
+            {
+                "datasets": store.list(),
+                "tile_config": tile_json,
+                "stats_config": stats_config_json(),
+                "basin_catalog": basin_catalog_json(),
+            },
         )

@@ -159,3 +159,14 @@ input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
 .peak-table th:first-child, .peak-table td:first-child { text-align: left; }
 .peak-note { font-size: .7rem; color: #667; padding: 8px 12px 14px; margin: 0; }
 .peak-error { color: #b91c1c; font-size: .8rem; padding: 10px 12px; margin: 0; }
+
+/* ---------- M9 预存地点洋区筛选 ---------- */
+/* 气旋洋区提示（muted 基础上收紧边距，紧凑置于复选框组上方）；无洋区时隐藏 */
+#storm-basin-hint { margin: .35rem 0 0; }
+#storm-basin-hint.hidden { display: none; }
+/* 复选框组：两列紧凑网格（8 码固定顺序渲染）；覆盖全局 label 的块级与边距 */
+.basin-filters { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem .4rem; margin: .3rem 0 .1rem; }
+.basin-check { display: flex; align-items: center; gap: .3rem; font-size: .76rem; color: #555; margin: 0; }
+.basin-check input { margin: 0; accent-color: #2563eb; }
+/* 无对应地点的洋区：禁用置灰（不可勾选） */
+.basin-check:has(input:disabled) { color: #b8bcc4; }
