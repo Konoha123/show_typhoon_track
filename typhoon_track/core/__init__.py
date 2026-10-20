@@ -5,6 +5,13 @@ core 的错误文案沿用其原文（含 CLI 选项字样），以便对照验�
 """
 
 from .aliases import ALIASES
+from .basin import (
+    BASIN_NAMES,
+    BASIN_ORDER,
+    TRACK_ID_PREFIX_TO_BASIN,
+    basin_from_track_id,
+    basin_label,
+)
 from .ensemble import (
     CATEGORY_STACK_BOTTOM_UP,
     DEFAULT_P_VALUES,
@@ -55,6 +62,8 @@ from .summary import (
 
 __all__ = [
     "ALIASES",
+    "BASIN_NAMES",
+    "BASIN_ORDER",
     "CATEGORY_STACK_BOTTOM_UP",
     "ClosestApproach",
     "CoreWindImpact",
@@ -72,11 +81,14 @@ __all__ = [
     "PeakProfile",
     "StormOverview",
     "ThresholdImpact",
+    "TRACK_ID_PREFIX_TO_BASIN",
     "UNKNOWN_COLOR",
     "UNKNOWN_KEY",
     "WIND_CATEGORIES",
     "WIND_THRESHOLDS",
     "WindCategory",
+    "basin_from_track_id",
+    "basin_label",
     "compass_16",
     "ensemble_profile",
     "exact_filter",
