@@ -110,6 +110,47 @@ def test_places_missing_columns_rejected(tmp_path: Path) -> None:
     assert "缺少必要列" in response.json()["detail"]
 
 
+def test_places_basin_na_code_survives_parsing(tmp_path: Path) -> None:
+    # M9-R1 回归：pandas 默认 NA 标记字符串集含 "NA"，与北大西洋洋区码冲突——
+    # 修复前 basin="NA" 被解析为缺失，38 个 NA 地点整行误跳（用户真实数据首现）
+    path = tmp_path / "places.csv"
+    path.write_text(
+        "name,lat,lon,basin,note\n"
+        "迈阿密,25.77427,-80.19366,NA,美国\n"
+        "东京,35.6895,139.6917,WP,日本\n",
+        encoding="utf-8",
+    )
+    payload = TestClient(
+        create_app(DatasetStore(tmp_path / "uploads"), places_path=path)
+    ).get("/api/places").json()
+    assert payload["warnings"] == []
+    assert [p["basin"] for p in payload["places"]] == ["NA", "WP"]
+    assert payload["places"][0]["name"] == "迈阿密"
+
+
+def test_places_warning_line_numbers_match_original_file(tmp_path: Path) -> None:
+    # M9-R1 行号修正：warning 按原文件实际行号报告（注释行与空行跳过不编号）
+    path = tmp_path / "places.csv"
+    path.write_text(
+        "# 首部注释一\n"
+        "# 首部注释二\n"
+        "name,lat,lon,basin,note\n"
+        "好点,10.0,20.0,WP,ok\n"
+        "# 中间注释\n"
+        "坏洋区,10.0,20.0,XX\n"
+        "\n"
+        ",11.0,21.0,WP\n",  # 第 8 行空名（第 7 行空行不产出记录、不占编号）
+        encoding="utf-8",
+    )
+    payload = TestClient(
+        create_app(DatasetStore(tmp_path / "uploads"), places_path=path)
+    ).get("/api/places").json()
+    assert [p["name"] for p in payload["places"]] == ["好点"]
+    assert len(payload["warnings"]) == 2
+    assert payload["warnings"][0].startswith("第 6 行 basin 缺失或非法")
+    assert payload["warnings"][1].startswith("第 8 行 name 为空")
+
+
 def test_places_empty_file_rejected(tmp_path: Path) -> None:
     path = tmp_path / "places.csv"
     path.write_text("", encoding="utf-8")
