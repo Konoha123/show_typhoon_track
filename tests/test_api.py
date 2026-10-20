@@ -82,6 +82,8 @@ def test_upload_forecast_and_query_tracks(client: TestClient) -> None:
     assert body["count"] == 5
     # 缺失字段保真：首行 SW 风圈缺失 → 显式 null（不臆造 0）
     assert body["rows"][0]["r34_sw"] is None
+    # 未按气旋筛选 → 无洋区（M9 storm_basin）
+    assert body["storm_basin"] is None
 
     filtered = client.get(
         f"/api/datasets/{meta['dataset_id']}/tracks",
@@ -94,15 +96,20 @@ def test_upload_forecast_and_query_tracks(client: TestClient) -> None:
     assert body["filters"]["storm"] == "syn202601"
     assert body["filters"]["at_lead_hours"] == 48
     assert body["filters"]["member"] is None
+    # 合成前缀 SYN 不在 ATCF 码表 → 未识别为 null（不臆造洋区）
+    assert body["storm_basin"] is None
 
 
 def test_openapi_documents_structured_contracts(client: TestClient) -> None:
     document = client.get("/openapi.json").json()
     schemas = document["components"]["schemas"]
     for name in ("DatasetMeta", "DatasetListResponse", "TrackFilters",
-                 "TrackPoint", "TracksResponse"):
+                 "TrackPoint", "TracksResponse", "Place", "PlacesResponse"):
         assert name in schemas, f"OpenAPI 缺少契约模型: {name}"
     assert "storm" in schemas["TrackPoint"]["properties"]
+    # M9：洋区字段进契约文档（气旋侧前缀直映 + 地点侧 8 码）
+    assert "storm_basin" in schemas["TracksResponse"]["properties"]
+    assert "basin" in schemas["Place"]["properties"]
 
 
 def test_upload_observation_kind(client: TestClient) -> None:
@@ -157,6 +164,7 @@ def test_real_upload_and_query(client: TestClient) -> None:
         f"/api/datasets/{meta['dataset_id']}/tracks", params={"storm": "WP962026"}
     ).json()
     assert wp["count"] == 2451  # 全部 50 个成员（意面图取数路径）
+    assert wp["storm_basin"] == "WP"  # M9：真实 track_id 前缀直映
 
     ep = client.get(
         f"/api/datasets/{meta['dataset_id']}/tracks",
@@ -166,3 +174,4 @@ def test_real_upload_and_query(client: TestClient) -> None:
     assert ep["rows"][0]["lat"] == pytest.approx(19.77, abs=0.01)
     assert ep["rows"][0]["lon_signed"] == pytest.approx(-108.44, abs=0.01)
     assert ep["rows"][0]["wind"] == pytest.approx(57.4, abs=0.1)
+    assert ep["storm_basin"] == "EP"

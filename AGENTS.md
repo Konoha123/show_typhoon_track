@@ -44,7 +44,7 @@
 
 - **核心纪律：未经实际执行的验证，不得声称已经通过。**
 - 验证范围按“变更文件集合 → 影响模块集合 → 完整源码集合”梯度确定，覆盖本次修改可能影响的整个依赖链。
-- 测试基线（pytest，`testpaths = tests demo_src`，共 237 项）：`tests/` 下 core 单测、CLI 行为一致性对照、service/api 集成（含 /static no-cache 头回归）与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`；含 M7f 反经线绘制形状比回归 2 项、M8 终生峰值栏交互 2 项与 M5d-R12 时效滑块解耦 3 项）、WNV3 配对真实数据交叉验证（缺文件自动跳过，含 M6 影响概率、M7 核心强风区与 M8 终生峰值独立复算抽核）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
+- 测试基线（pytest，`testpaths = tests demo_src`，共 245 项）：`tests/` 下 core 单测（含 M9 洋区码表与前缀直映）、CLI 行为一致性对照、service/api 集成（含 /static no-cache 头回归、M9 places basin 校验与 tracks `storm_basin`）与 UI E2E（Playwright 无头浏览器，未安装环境自动跳过；首次使用需 `python -m playwright install chromium`；含 M7f 反经线绘制形状比回归 2 项、M8 终生峰值栏交互 2 项与 M5d-R12 时效滑块解耦 3 项）、WNV3 配对真实数据交叉验证（缺文件自动跳过，含 M6 影响概率、M7 核心强风区与 M8 终生峰值独立复算抽核）+ `demo_src` 原有 15 项。改动解析相关逻辑后必须全量回跑 `python -m pytest -q`；demo_src 亦可按原方式单独回跑：
 
   ```bash
   cd demo_src && python -m unittest -v test_wnc_csv_demo.py test_wnc_csv_real.py

@@ -1,5 +1,6 @@
 # 预存地点模板：复制为 places/places.csv 后自行维护（本目录除 example 外均被 git 忽略）
-# 列：name,lat,lon,note（note 可选；name 唯一；lat∈[-90,90]、lon∈[-180,180] 十进制度；# 注释行忽略）
-name,lat,lon,note
-东京,35.6895,139.6917,示例：日本关东
-那霸,26.2124,127.6809,示例：日本冲绳
+# 列：name,lat,lon,basin,note（note 可选；name 唯一；lat∈[-90,90]、lon∈[-180,180] 十进制度；# 注释行忽略）
+# basin 洋区码（M9 起必填，一地一码）：NA 北大西洋 / EP 东北太平洋 / CP 中太平洋 / WP 西北太平洋 / NI 北印度洋 / SI 南印度洋 / SP 南太平洋 / SA 南大西洋；缺失或非法码该行视为错误数据跳过并提示
+name,lat,lon,basin,note
+东京,35.6895,139.6917,WP,示例：日本关东
+那霸,26.2124,127.6809,WP,示例：日本冲绳

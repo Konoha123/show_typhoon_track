@@ -70,7 +70,7 @@ IMPACT_CSV = (
     "0,0,0,0,0,0,0,0,0,0,0,0\n"
 )
 
-PLACES_CSV = "name,lat,lon,note\n那霸,26.2124,127.6809,冲绳\n"
+PLACES_CSV = "name,lat,lon,basin,note\n那霸,26.2124,127.6809,WP,冲绳\n"
 
 # M8 终生峰值：3 成员，成员 03 风速整列缺失（哨兵显示"-"），气压正常
 PEAK_SENTINEL_CSV = (

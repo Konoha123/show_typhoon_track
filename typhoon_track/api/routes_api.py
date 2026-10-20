@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
+from typhoon_track.core.basin import basin_from_track_id
 from typhoon_track.service.datasets import KINDS, DatasetStore
 from typhoon_track.service.places import load_places
 from typhoon_track.service.queries import ensemble_stats, impact_stats, peak_stats, track_rows
@@ -65,7 +66,8 @@ def register(app: FastAPI) -> None:
         return PlacesResponse(
             available=result.available,
             places=[
-                Place(name=p.name, lat=p.lat, lon=p.lon, note=p.note) for p in result.places
+                Place(name=p.name, lat=p.lat, lon=p.lon, basin=p.basin, note=p.note)
+                for p in result.places
             ],
             warnings=list(result.warnings),
         )
@@ -101,6 +103,7 @@ def register(app: FastAPI) -> None:
             dataset_id=dataset_id,
             kind=parsed.kind,
             filters=filters,
+            storm_basin=basin_from_track_id(filters.storm),
             count=len(points),
             rows=points,
         )

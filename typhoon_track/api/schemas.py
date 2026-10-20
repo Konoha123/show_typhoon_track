@@ -58,6 +58,7 @@ class Place(BaseModel):
     name: str
     lat: float
     lon: float
+    basin: str  # 洋区码（core.basin.BASIN_ORDER 8 码之一，M9）
     note: str | None = None
 
 
@@ -121,6 +122,7 @@ class TracksResponse(BaseModel):
     dataset_id: str
     kind: Kind
     filters: TrackFilters
+    storm_basin: str | None = None  # 当前气旋洋区（track_id 前缀直映，M9；未筛选/未识别为 null）
     count: int
     rows: list[TrackPoint]
 
