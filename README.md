@@ -2,7 +2,7 @@
 
 基于 Google Weather Lab / WeatherNext Cyclones (WNC) 热带气旋预报数据，构建一套**导入 → 解析 → 交互式网页可视化**的工具：用户在页面上导入预报轨迹 CSV，系统解析后在地图上展示气旋路径与强度，并叠加基础交互功能。必要时采用前后端分离方案。
 
-> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点洋区筛选）已落地（M1–M9）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
+> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点洋区筛选）、服务简单入口与 configs 统一已落地（M1–M10）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
 
 ## 目录结构
 
@@ -17,7 +17,8 @@ show_typhoon_track/
 │   └── __main__.py
 ├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
 ├── docs/                              # 验收与确认记录（含 M2/M3 验收、瓦片数据源确认）
-├── configs/                           # 运行时配置（tiles.toml 瓦片配置：url_template/attribution/max_zoom）
+├── app.py                             # Web 服务简单入口（python app.py，M10；监听配置 configs/server.json）
+├── configs/                           # 运行时配置（tiles.toml 瓦片：url_template/attribution/max_zoom；server.json 服务监听：host/port）
 ├── places/                            # 预存地点（places.csv 用户维护、git 忽略；example 模板入库）
 ├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
@@ -84,7 +85,9 @@ python wnc_csv_demo.py 'FNV3P2_2026_10_14T00_00_paired (1).csv' \
 
 ```bash
 conda activate show-typhoon-track
-python -m uvicorn typhoon_track.api.app:app --port 8000
+python app.py
+# 等价方式：python -m uvicorn typhoon_track.api.app:app --host 127.0.0.1 --port 8000
+# 监听地址与端口在 configs/server.json 配置（pydantic 校验，缺文件报错退出）；CSV CLI 为 python -m typhoon_track，两入口不冲突
 # 浏览器访问 http://127.0.0.1:8000 ：
 #   - 上传预报/观测 CSV（双入口）→ 选择气旋/起报/成员 → 地图渲染轨迹
 #   - 成员"全部"为意面图；单成员按强度着色点位；观测轨迹黑虚线叠加；概率圆时次滑块只取实际存在档位（默认 0 档、仅移动当前时次高亮概率圆，不截断成员线/图表；上限截断于首个低分母时次，尾部消散成员不画概率圆；单成员模式禁用）
@@ -148,7 +151,7 @@ python -m compileall -q typhoon_track  # L0 语法编译
 ruff check --no-fix .                 # L1 静态缺陷
 pyright                               # L2 静态类型
 python -m pip check && deptry . && lint-imports   # L3 依赖与架构
-python -m pytest -q                   # L5 功能测试（249 项基线，含 Playwright UI E2E）
+python -m pytest -q                   # L5 功能测试（256 项基线，含 Playwright UI E2E）
 ```
 
 ## 路线图
@@ -162,6 +165,7 @@ python -m pytest -q                   # L5 功能测试（249 项基线，含 Pl
 - ✅ **基于使用的优化（第一轮）**：影响概率第四级核心强风区（距离≤RMW，RMW 缺失/≤0 不命中留在分母）、参考圆分级配色+左栏图例、接口调用轻量加载提示（状态栏 busy 文案 + 上传按钮禁用）、位置概率半径图表暂隐藏（数据链路与锚点保留，视使用体验再决定恢复或删除）
 - ✅ **终生峰值强度（M8）**：每成员整条预报轨迹的终生最大风速/最低气压（独立取极值、各示出现时效、并列取最早）+ 跨成员上中位值与平均数（消散成员以有限峰值参与、指标全缺成员为哨兵显"-"且不进聚合）；`peak-stats` 端点 + 默认隐藏、聚合卡内入口展开的第四栏（风速峰值与时效标签按图例强度等级着色）；无官方对照产品，以独立 pandas 复算验收
 - ✅ **预存地点洋区筛选（M9）**：`places.csv` 手工维护 8 码洋区标注（IBTrACS 七分 + CP 扩展）；目标地点区洋区复选框（固定顺序、默认全选、无地点洋区置灰、不跟随气旋）即时过滤地点下拉；当前气旋洋区提示（`track_id` 前缀直映不合并：AL→NA/EP/CP/WP/IO→NI/SH，未识别前缀隐藏）
+- ✅ **服务简单入口与 configs 统一（M10）**：根目录 `python app.py` 薄封装启动 Web 服务（`configs/server.json` pydantic JSON 解析 host/port，缺文件报错退出；与 `python -m uvicorn ...` 并列）；运行时配置统一 `configs/`（tiles.toml + server.json；places/uploads 属运行时数据不迁入）
 - 📋 **候补**：跨数据集叠加对比、瓦片数据源切换等
 
 开发用里程碑基线（状态、提交、依赖与验收要点）见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
