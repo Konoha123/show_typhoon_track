@@ -38,7 +38,7 @@ def test_index_page_renders(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "台风轨迹工作台" in response.text
-    # 瓦片配置注入页面（来自根目录 config.toml，不硬编码）
+    # 瓦片配置注入页面（来自 configs/tiles.toml，不硬编码）
     assert "server.arcgisonline.com" in response.text
     assert "/static/vendor/leaflet.js" in response.text
     # M4 曲线联动：图表容器与 uPlot vendor 引用

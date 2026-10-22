@@ -22,11 +22,11 @@ def test_load_repo_default_config() -> None:
     assert "{z}" in config.url_template and "{x}" in config.url_template and "{y}" in config.url_template
     assert config.attribution
     assert config.max_zoom >= 1
-    assert (PROJECT_ROOT / "config.toml").is_file()
+    assert (PROJECT_ROOT / "configs" / "tiles.toml").is_file()
 
 
 def test_load_from_custom_path(tmp_path: Path) -> None:
-    custom = tmp_path / "config.toml"
+    custom = tmp_path / "tiles.toml"
     custom.write_text(
         '[tiles]\nurl_template = "https://example.com/{z}/{y}/{x}"\n'
         'attribution = "test"\nmax_zoom = 12\n',

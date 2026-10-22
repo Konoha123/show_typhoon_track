@@ -43,7 +43,7 @@ class NoCacheStaticFiles(StaticFiles):
 
 @dataclass(frozen=True)
 class TileConfig:
-    """瓦片配置（来自根目录 config.toml，注入页面）。"""
+    """瓦片配置（来自 configs/tiles.toml，注入页面）。"""
 
     url_template: str
     attribution: str
@@ -51,8 +51,8 @@ class TileConfig:
 
 
 def load_tile_config(config_path: str | Path | None = None) -> TileConfig:
-    """读取 config.toml 的 [tiles]；模板缺 {z}/{x}/{y} 占位符即报错，防止静默错配。"""
-    path = Path(config_path) if config_path is not None else PROJECT_ROOT / "config.toml"
+    """读取 configs/tiles.toml 的 [tiles]；模板缺 {z}/{x}/{y} 占位符即报错，防止静默错配。"""
+    path = Path(config_path) if config_path is not None else PROJECT_ROOT / "configs" / "tiles.toml"
     if not path.is_file():
         raise ValueError(f"瓦片配置文件不存在: {path}")
     with path.open("rb") as handle:
@@ -60,7 +60,7 @@ def load_tile_config(config_path: str | Path | None = None) -> TileConfig:
     tiles = data.get("tiles", {})
     url_template = str(tiles.get("url_template", ""))
     if not url_template or not all(tag in url_template for tag in ("{z}", "{x}", "{y}")):
-        raise ValueError(f"config.toml [tiles] url_template 需含 {{z}}/{{x}}/{{y}} 占位符: {url_template!r}")
+        raise ValueError(f"tiles.toml [tiles] url_template 需含 {{z}}/{{x}}/{{y}} 占位符: {url_template!r}")
     return TileConfig(
         url_template=url_template,
         attribution=str(tiles.get("attribution", "")),

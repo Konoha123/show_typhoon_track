@@ -71,7 +71,7 @@
   - `typhoon_track/service/`：编排层（datasets：uploads 目录存储+LRU 解析缓存；queries：筛选与行级载荷、经度双约定；places：根目录 `places/places.csv` 热读取预存地点，坏行跳过+warnings，M9 起 basin 洋区列必填——缺失/非法码跳行、整表缺列单条汇总 warning）；
   - `typhoon_track/api/`：FastAPI 路由与应用工厂（`uvicorn typhoon_track.api.app:app`）；CSV 双导入入口 `kind=forecast|observation`；轨迹查询（tracks 响应含 `storm_basin`[M9：track_id 前缀直映，未筛选/未识别为 null]）与集合统计聚合端点（`ensemble-stats`，仅限预报、拒绝跨气旋/起报混合）；影响统计端点（`impact-stats`，仅限预报、缺风圈列显式 400 不回退、返回三级风速命中概率+核心强风区（距离≤RMW，M7d）+ mean 口径最近接近）与预存地点端点（`GET /api/places`，热读取，M9 起逐地点携带 basin 洋区码）；终生峰值统计端点（`peak-stats`，M8：仅限预报、整条轨迹 wind max/pressure min 独立极值、上中位值+平均、哨兵剔除）；接口输入输出契约由 `api/schemas.py` 的 pydantic 模型定义（DatasetMeta / TrackFilters / TrackPoint / TracksResponse / EnsembleLeadStats / EnsembleStatsResponse / ImpactThresholdStats / CoreWindStats / ClosestApproach / ImpactStatsResponse / PeakMetricStats / MemberPeak / PeakStatsResponse / Place / PlacesResponse，同步进入 OpenAPI 文档）；页面注入瓦片配置、统计配置（分级/堆叠次序/p 档/低分母阈值，单源 core.ensemble）与洋区码表 BASIN_CATALOG（单源 core.basin，地点 8 码 + SH cycloneOnly，M9）；
   - `typhoon_track/web/`：三栏地图工作台（左导入/图例—中地图—右可滚动图表栏；第三栏强度分布图下方为「终生峰值强度」聚合卡——4 聚合数 + 「每成员明细」入口，最右侧每成员明细第四栏默认隐藏、入口双向展开[M8/M8-R1]；templates + static：原生 ES Module JS、Leaflet 1.9.4 与 uPlot 1.6.32 本地 vendor、观测叠加、概率圆时次滑块（纯查看器：默认 0 档、仅移动当前时次高亮 p 圆，不截断成员线/图表；max 截断于首个低分母时次与均值线同口径[M5d-R11/R12]、单成员/统计未就绪时禁用）、强度曲线双向联动[M3/M4]、自算均值叠加/强度分布堆叠/概率半径曲线与地图 p 圆[M5]、目标地点选点（预存/坐标/点选）与影响概率卡片及参考圆[M6]、预存地点洋区复选框筛选（8 码固定顺序默认全选、无地点洋区置灰、不跟随气旋）与当前气旋洋区提示（前缀直映标签，未识别隐藏）[M9]、参考圆分级配色+图例/接口调用轻量加载提示（状态栏 busy 文案+上传禁用）/位置概率半径图表暂隐藏（锚点与数据链路保留）/影响概率第四级核心强风区[M7]、跨 180° 经线组内经度展开（点/线/包围盒同组同副本、圆环相对圆心展开，走最短方向[M7f]、每成员峰值明细表哨兵"-"与风速峰值图例强度原色着色（值+时效标签，哨兵/气压列不着色）[M8/M8-R2]）；静态资源经 NoCacheStaticFiles 显式 no-cache（M8-R1：杜绝浏览器启发式缓存的「新 HTML+旧 CSS」，模板引用带 ?v= 版本参数）；
-  - 根目录 `config.toml`：瓦片配置（url_template/attribution/max_zoom），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属候补功能池（见 `docs/里程碑基线.md`）；
+  - 根目录 `configs/`：运行时配置目录（M10 起，盘点结论：瓦片与服务监听属配置，`places/`、`uploads/` 属运行时数据不迁入）——`configs/tiles.toml` 瓦片配置（url_template/attribution/max_zoom，M10a 由根目录 `config.toml` 迁入），api 层 `load_tile_config` 加载并注入页面，代码不硬编码（确认记录见 `docs/瓦片数据源确认_20261015.md`）；多瓦片源切换属候补功能池（见 `docs/里程碑基线.md`）；
   - `typhoon_track/cli.py` + `__main__.py`：重组 CLI 入口（`python -m typhoon_track`），与 `demo_src/wnc_csv_demo.py` 行为逐字节一致（`tests/test_cli_parity.py` 参数矩阵 × 数据集矩阵对照）；
   - `tests/`：正式测试目录（core 单测 + service/api 集成 + CLI 行为一致性对照 + Playwright UI E2E，pytest）；
   - 端到端验收记录留存于根目录（如 `M2服务与上传验收记录_20261015.md`）。
@@ -117,7 +117,7 @@
 - [x] 前端技术选型：轻方案（无构建链）——FastAPI + Jinja2 + 原生 ES Module JS + Leaflet（本地 vendor，不经 npm）；前后端分离但单体服务，本机单人使用
 - [x] 后端框架选型：FastAPI + uvicorn；包名 `typhoon_track`，分层契约 `api → service → core`（`.importlinter` 随 M1 落地）；CSV 双导入入口 `kind=forecast|observation`
 - [x] 页面导入 CSV 的上传存储策略：`uploads/<数据集id>/original.csv + meta.json`（含 kind），无数据库，按需重解析 + 进程内 LRU 缓存（`.gitignore` 已预留 `uploads/`）
-- [x] 瓦片：默认 AWS 瓦片源；URL 由根目录 `config.toml` 配置项提供（M3 落地），不硬编码；多瓦片源切换归入候补功能池（`docs/里程碑基线.md`）
+- [x] 瓦片：默认 AWS 瓦片源；URL 由瓦片配置文件提供（M3 落地根目录 `config.toml`，M10a 迁至 `configs/tiles.toml`），不硬编码；多瓦片源切换归入候补功能池（`docs/里程碑基线.md`）
 - [x] 依赖声明文件形式：已采用 `requirements.txt`（运行时）+ `requirements-dev.txt`（开发）
 - [x] ruff / pyright / pytest / deptry 配置落地（`ruff.toml`、`pyrightconfig.json`、`pytest.ini`、`pyproject.toml`；`.importlinter` 待包结构）
 - [x] 正式包结构与测试目录（M1/M1b 已落地，登记于 §5）

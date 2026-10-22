@@ -17,7 +17,7 @@ show_typhoon_track/
 │   └── __main__.py
 ├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
 ├── docs/                              # 验收与确认记录（含 M2/M3 验收、瓦片数据源确认）
-├── config.toml                        # 瓦片配置（url_template/attribution/max_zoom）
+├── configs/                           # 运行时配置（tiles.toml 瓦片配置：url_template/attribution/max_zoom）
 ├── places/                            # 预存地点（places.csv 用户维护、git 忽略；example 模板入库）
 ├── demo_src/                          # 演示与参考代码（命令行版，行为对照基准）
 │   ├── wnc_csv_demo.py                # CSV 读取、字段识别、轨迹选取、导出
@@ -92,7 +92,7 @@ python -m uvicorn typhoon_track.api.app:app --port 8000
 #     卡内「每成员明细」按钮展开最右侧明细栏（成员、峰值风速/气压与出现时效；
 #     风速峰值与时效标签按左栏图例的强度等级着色，哨兵"-"不着色）
 #   - 目标地点与影响概率的用法见下文「目标地点与影响概率使用说明」
-# 瓦片数据源在 config.toml 配置（确认记录见 docs/瓦片数据源确认_20261015.md）
+# 瓦片数据源在 configs/tiles.toml 配置（确认记录见 docs/瓦片数据源确认_20261015.md；M10 起由根目录 config.toml 迁入 configs/）
 # REST 接口：POST /api/datasets（file+kind）、GET /api/datasets、GET /api/datasets/{id}(/tracks)
 ```
 
