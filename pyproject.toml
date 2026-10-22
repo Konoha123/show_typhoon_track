@@ -5,6 +5,6 @@
 known_first_party = ["typhoon_track", "wnc_csv_demo"]
 
 [tool.deptry.per_rule_ignores]
-# 框架隐式使用的运行时依赖：uvicorn（部署命令）、jinja2（Jinja2Templates）、
-# python-multipart（FastAPI 文件/表单解析），代码中不直接 import 属预期
-DEP002 = ["uvicorn", "jinja2", "python-multipart"]
+# 框架隐式使用的运行时依赖：jinja2（Jinja2Templates）、python-multipart（FastAPI
+# 文件/表单解析），代码中不直接 import 属预期；uvicorn 已由根目录 app.py 直接 import
+DEP002 = ["jinja2", "python-multipart"]
