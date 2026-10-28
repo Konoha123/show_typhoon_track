@@ -118,6 +118,8 @@ def impact_stats(
             "fraction": profile.core_wind.fraction,
         },
         "closest": closest,
+        # M11a：closest 为 None 时的不可用原因（core 原因码透传，api 层映射文案）
+        "closest_reason": profile.closest_reason,
     }
 
 

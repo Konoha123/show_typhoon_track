@@ -14,8 +14,10 @@ from typhoon_track.core import (
     LOW_DENOMINATOR_FRACTION,
     UNKNOWN_KEY,
     WIND_CATEGORIES,
+    effective_lead_profiles,
     ensemble_profile,
     haversine_km,
+    low_denominator_cut_lead,
     spherical_mean,
     wind_category,
 )
@@ -157,6 +159,37 @@ def test_profile_tail_denominator_dissipated_and_low_flag() -> None:
     assert low[6.0].category_counts[DISSIPATED_KEY] == 3
     assert low[0.0].low_denominator is False
     assert LOW_DENOMINATOR_FRACTION == 0.3
+
+
+# ---------- 截断规则（M11：首个低分母时次截止的唯一规范实现） ----------
+
+
+def test_low_denominator_cut_lead_and_effective_profiles() -> None:
+    # 4 成员 0/6 全员在场，12 起仅剩 1 名（25% < 30%）→ 截断于 12h
+    rows = [{"member": str(m), "lead_h": lead} for m in range(4) for lead in (0.0, 6.0)]
+    rows += [{"member": "0", "lead_h": lead} for lead in (12.0, 18.0)]
+    profiles = ensemble_profile(make_frame(rows))
+    assert low_denominator_cut_lead(profiles) == 12.0
+    assert [p.lead_h for p in effective_lead_profiles(profiles)] == [0.0, 6.0]
+
+
+def test_low_denominator_cut_lead_absent_returns_none_and_full_profiles() -> None:
+    # 无低分母时次：不截断（原样返回）；空序列同样为 None/空
+    rows = [{"member": str(m), "lead_h": 0.0} for m in range(4)]
+    profiles = ensemble_profile(make_frame(rows))
+    assert low_denominator_cut_lead(profiles) is None
+    assert effective_lead_profiles(profiles) == profiles
+    assert low_denominator_cut_lead([]) is None
+    assert effective_lead_profiles([]) == []
+
+
+def test_low_denominator_cut_lead_first_lead_low_denominator() -> None:
+    # 首时次即低分母（极端消散：lead 0 仅 1/4 在场）：截断于首时次 → 截断内为空
+    rows = [{"member": "0", "lead_h": 0.0}]
+    rows += [{"member": str(m), "lead_h": 6.0} for m in range(1, 4)]
+    profiles = ensemble_profile(make_frame(rows))
+    assert low_denominator_cut_lead(profiles) == 0.0
+    assert effective_lead_profiles(profiles) == []
 
 
 def test_profile_category_counts_and_unknown_wind() -> None:

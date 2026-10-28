@@ -15,22 +15,35 @@
 - 分母 = 该 (storm, init) 下出现过的成员总数（与 M5 n_total 同口径）；
 - 缺少任一风圈字段即显式拒绝，不提供纯距离回退（用户确认）；
 - 最近接近采用 M5 自算逐时次均值位置（ensemble_profile，已 94/94 验证），
-  并列等距取最早时效；方位角/16 方位为地点→气旋中心方向。
+  并列等距取最早时效；方位角/16 方位为地点→气旋中心方向；
+- 最近接近截断口径（M11a）：只在截断内时次中选取（effective_lead_profiles，
+  止于首个低分母时次之前——与 M5d-R1 起前端 mean 线同口径）；截断内全程无有效
+  均值位置时 closest 为 None 并以 closest_reason 区分原因（no_mean_position =
+  全程无均值位置；truncated_empty = 截断内无时次可取），缺失保持缺失。
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
-from .ensemble import _member_keys, _numeric_values, _validate_single_track, ensemble_profile
+from .ensemble import (
+    _member_keys,
+    _numeric_values,
+    _validate_single_track,
+    effective_lead_profiles,
+    ensemble_profile,
+)
 from .geo import compass_16, haversine_km, initial_bearing_deg
 
 WIND_THRESHOLDS: tuple[int, ...] = (34, 50, 64)
 _QUADRANTS: tuple[str, ...] = ("ne", "se", "sw", "nw")
+
+# closest 为 None 时的不可用原因（M11a；全程均无有效均值位置 vs 截断内无时次可取）
+ClosestUnavailableReason = Literal["no_mean_position", "truncated_empty"]
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,8 @@ class ImpactProfile:
     thresholds: tuple[ThresholdImpact, ...]
     core_wind: CoreWindImpact
     closest: ClosestApproach | None
+    # closest 为 None 时的原因（closest 非 None 时为 None；M11a）
+    closest_reason: ClosestUnavailableReason | None = None
 
 
 def quadrant_of_bearing(bearing_deg: float) -> str:
@@ -188,15 +203,27 @@ def impact_profile(
         total_members=total,
         fraction=(len(core_hits) / total) if total else None,
     )
+    closest, closest_reason = _closest_approach(frame, lat=lat, lon=lon)
     return ImpactProfile(
-        thresholds=stats, core_wind=core_wind, closest=_closest_approach(frame, lat=lat, lon=lon)
+        thresholds=stats, core_wind=core_wind, closest=closest, closest_reason=closest_reason
     )
 
 
-def _closest_approach(frame: pd.DataFrame, *, lat: float, lon: float) -> ClosestApproach | None:
-    """逐时次自算均值位置中离目标地点最近的时次（并列取最早时效；无有效位置为 None）。"""
+def _closest_approach(
+    frame: pd.DataFrame, *, lat: float, lon: float
+) -> tuple[ClosestApproach | None, ClosestUnavailableReason | None]:
+    """截断内时次中离目标地点最近的自算均值位置时次（并列取最早时效）。
+
+    M11a：只在 effective_lead_profiles（止于首个低分母时次之前）内选取；返回
+    (最近接近, 不可用原因)——closest 非 None 时原因为 None，否则区分全程无均值
+    位置（no_mean_position）与截断内无时次可取（truncated_empty）。
+    """
+    profiles = ensemble_profile(frame, p_values=(100,))
+    has_position = any(
+        profile.mean_lat is not None and profile.mean_lon is not None for profile in profiles
+    )
     closest: ClosestApproach | None = None
-    for profile in ensemble_profile(frame, p_values=(100,)):
+    for profile in effective_lead_profiles(profiles):
         if profile.mean_lat is None or profile.mean_lon is None:
             continue
         distance = haversine_km(lat, lon, profile.mean_lat, profile.mean_lon)
@@ -213,4 +240,7 @@ def _closest_approach(frame: pd.DataFrame, *, lat: float, lon: float) -> Closest
                 mean_lat=profile.mean_lat,
                 mean_lon=profile.mean_lon,
             )
-    return closest
+    reason: ClosestUnavailableReason | None = None
+    if closest is None:
+        reason = "no_mean_position" if not has_position else "truncated_empty"
+    return closest, reason

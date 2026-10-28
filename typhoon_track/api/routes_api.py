@@ -16,6 +16,7 @@ from typhoon_track.service.places import load_places
 from typhoon_track.service.queries import ensemble_stats, impact_stats, peak_stats, track_rows
 
 from .schemas import (
+    CLOSEST_NOTE_TEXTS,
     CORE_WIND_LABEL,
     IMPACT_THRESHOLD_LABELS,
     CoreWindStats,
@@ -187,6 +188,7 @@ def register(app: FastAPI) -> None:
             for stat in payload["thresholds"]
         ]
         core = payload["core_wind"]
+        reason = payload.get("closest_reason")
         return ImpactStatsResponse(
             dataset_id=dataset_id,
             kind=parsed.kind,
@@ -197,4 +199,6 @@ def register(app: FastAPI) -> None:
             thresholds=thresholds,
             core_wind=CoreWindStats(label=CORE_WIND_LABEL, **core),
             closest=payload["closest"],
+            # M11a：core 原因码 -> 中文文案（closest 非 None 时为 None）
+            closest_note=CLOSEST_NOTE_TEXTS.get(reason) if reason else None,
         )

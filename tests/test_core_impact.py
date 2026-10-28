@@ -254,6 +254,7 @@ def test_impact_profile_mixed_storm_or_init_rejected() -> None:
 def test_impact_profile_all_positions_missing_no_closest() -> None:
     profile = impact_profile(make_frame([{"lat": None, "lon": None}]), lat=10.0, lon=130.0)
     assert profile.closest is None
+    assert profile.closest_reason == "no_mean_position"
     assert all(s.hit_members == 0 for s in profile.thresholds)
 
 
@@ -284,6 +285,59 @@ def test_impact_profile_closest_approach_northeast_compass() -> None:
     assert closest is not None
     assert closest.bearing_deg == pytest.approx(45.0, abs=0.75)  # 气旋在地点东北（大圆偏差）
     assert closest.compass == "NE"
+
+
+# ---------- 最近接近截断口径（M11a：止于首个低分母时次之前） ----------
+
+
+def test_impact_profile_closest_truncated_before_low_denominator_tail() -> None:
+    # M11a 最小复现：4 成员 0/24/48h 全员在场（mean 在 10N），72h 起仅 m1 存活
+    # （低分母尾段）且其位置贴近目标——无截断时最近接近为 72h/0km；修复后应回退
+    # 到截断内最近时次（lead 0），与前端 mean 线（M5d-R1 起截断）同口径
+    rows = [{"member": str(m), "lead_h": lead} for m in range(4) for lead in (0.0, 24.0, 48.0)]
+    rows += [{"member": "0", "lead_h": lead, "lat": 15.0} for lead in (72.0, 96.0, 120.0)]
+    profile = impact_profile(make_frame(rows), lat=15.0, lon=130.0)
+    closest = profile.closest
+    assert closest is not None
+    assert closest.lead_h == 0.0
+    assert closest.mean_lat == pytest.approx(10.0)
+    assert closest.distance_km == pytest.approx(haversine_km(15.0, 130.0, 10.0, 130.0))
+    assert closest.distance_km > 500.0  # 修复前为 72h/0km（低分母尾段均值中心）
+    assert profile.closest_reason is None
+
+
+def test_impact_profile_closest_all_low_denominator_returns_none() -> None:
+    # 极端消散：首时次即低分母（lead 0 仅 1/4 在场）→ 截断内无时次可取 → None + 原因
+    # （缺失保持缺失，不退回首时次）
+    rows = [{"member": "0", "lead_h": 0.0, "lat": 15.0, "lon": 130.0}]
+    rows += [{"member": str(m), "lead_h": 24.0, "lat": 15.0, "lon": 130.0} for m in range(1, 4)]
+    profile = impact_profile(make_frame(rows), lat=15.0, lon=130.0)
+    assert profile.closest is None
+    assert profile.closest_reason == "truncated_empty"
+
+
+def test_impact_profile_closest_positions_only_in_tail_truncated_empty() -> None:
+    # 有效均值位置仅存在于低分母尾段：全程有位置但截断内时次均值位置缺失 → truncated_empty
+    rows = [
+        {"member": str(m), "lead_h": 0.0, "lat": None, "lon": None} for m in range(4)
+    ] + [{"member": "0", "lead_h": 6.0, "lat": 15.0, "lon": 130.0}]
+    profile = impact_profile(make_frame(rows), lat=15.0, lon=130.0)
+    assert profile.closest is None
+    assert profile.closest_reason == "truncated_empty"
+
+
+def test_impact_profile_closest_single_member_untruncated() -> None:
+    # 单成员轨迹 low_denominator 恒为 False（n_total=1）：不截断，最近接近可落在晚时效
+    frame = make_frame(
+        [
+            {"lead_h": 0.0, "lat": 10.0, "lon": 130.0},
+            {"lead_h": 72.0, "lat": 15.0, "lon": 130.0},
+        ]
+    )
+    closest = impact_profile(frame, lat=15.0, lon=130.0).closest
+    assert closest is not None
+    assert closest.lead_h == 72.0
+    assert closest.distance_km == pytest.approx(0.0, abs=1e-6)
 
 
 # ---------- 真实数据抽核（WNV3 配对文件，缺失自动跳过） ----------

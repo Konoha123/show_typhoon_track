@@ -193,6 +193,12 @@ IMPACT_THRESHOLD_LABELS: dict[int, str] = {
 }
 CORE_WIND_LABEL = "核心强风区（距离≤RMW）"
 
+# closest 为 None 时的不可用原因文案（M11a；键为 core.impact 的原因码）
+CLOSEST_NOTE_TEXTS: dict[str, str] = {
+    "no_mean_position": "全程无有效均值位置，最近接近不可用",
+    "truncated_empty": "截断内无有效时次（首个低分母时次前无可取均值位置），最近接近不可用",
+}
+
 
 class ImpactThresholdStats(BaseModel):
     """单一风速阈值的目标地点影响统计（口径见 core.impact 与 M6/M7 基线）。"""
@@ -229,7 +235,8 @@ class ClosestApproach(BaseModel):
 
 class ImpactStatsResponse(BaseModel):
     """影响统计响应；thresholds 固定 34/50/64 kt 三级 + core_wind 核心强风区（M7d），
-    closest 无有效位置时为 null。"""
+    closest 无有效位置时为 null，并以 closest_note 说明原因（M11a：全程无均值位置 /
+    截断内无有效时次，文案见 CLOSEST_NOTE_TEXTS）。"""
 
     dataset_id: str
     kind: Kind
@@ -240,3 +247,4 @@ class ImpactStatsResponse(BaseModel):
     thresholds: list[ImpactThresholdStats]
     core_wind: CoreWindStats
     closest: ClosestApproach | None
+    closest_note: str | None = None  # closest 为 None 时的原因文案；closest 非 None 时为 null

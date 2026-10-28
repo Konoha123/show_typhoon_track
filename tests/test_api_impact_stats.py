@@ -97,6 +97,53 @@ def test_impact_stats_thresholds_and_closest(client: TestClient) -> None:
     assert closest["compass"] == "NNW"
     assert closest["mean_wind"] == pytest.approx(32.5)
     assert closest["mean_pressure"] == pytest.approx(1000.0)
+    # M11a：closest 非 None 时 closest_note 为 None（契约字段存在且语义正确）
+    assert body["closest_note"] is None
+
+
+def test_impact_stats_closest_note_truncated_empty(client: TestClient) -> None:
+    # M11a：首时次即低分母（lead 0 仅 1/4 成员在场）→ closest=null + 截断内无有效时次文案
+    csv = (
+        "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+        "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,"
+        f"{_RADIUS_COLS}\n"
+        "SYN202601,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000,"
+        "100,0,0,0,60,0,0,0,30,0,0,0\n"
+        "SYN202601,02,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.0,132.0,30,1002,"
+        "0,0,0,0,0,0,0,0,0,0,0,0\n"
+        "SYN202601,03,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.1,132.1,30,1002,"
+        "0,0,0,0,0,0,0,0,0,0,0,0\n"
+        "SYN202601,04,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.2,132.2,30,1002,"
+        "0,0,0,0,0,0,0,0,0,0,0,0\n"
+    )
+    meta = _upload(client, "low.csv", csv.encode()).json()
+    response = _impact(client, meta["dataset_id"], lat=17.5, lon=132.0)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["closest"] is None
+    assert "截断内无有效时次" in body["closest_note"]
+
+
+def test_impact_stats_closest_note_no_mean_position(client: TestClient) -> None:
+    # M11a：被查询气旋全程无有效均值位置（另一气旋行保证上传 lat 列校验通过）
+    # → closest=null + 全程无均值位置文案（区别于截断原因）
+    csv = (
+        "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+        "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,"
+        f"{_RADIUS_COLS}\n"
+        "SYN202601,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000,"
+        "100,0,0,0,60,0,0,0,30,0,0,0\n"
+        "SYN202602,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,,,35,1000,"
+        "100,0,0,0,60,0,0,0,30,0,0,0\n"
+        "SYN202602,01,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,,,34,999,"
+        "80,0,0,0,50,0,0,0,0,0,0,0\n"
+    )
+    meta = _upload(client, "nopos.csv", csv.encode()).json()
+    response = _impact(client, meta["dataset_id"], lat=17.5, lon=132.0, storm="SYN202602")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["closest"] is None
+    assert "全程无有效均值位置" in body["closest_note"]
 
 
 def test_impact_stats_openapi_contract(client: TestClient) -> None:
@@ -107,6 +154,9 @@ def test_impact_stats_openapi_contract(client: TestClient) -> None:
     closest_properties = schemas["ClosestApproach"]["properties"]
     for field in ("distance_km", "bearing_deg", "compass", "mean_wind", "mean_pressure"):
         assert field in closest_properties
+    # M11a：closest_note 进契约（closest 为 null 时的原因文案）
+    impact_properties = schemas["ImpactStatsResponse"]["properties"]
+    assert "closest_note" in impact_properties
     core_properties = schemas["CoreWindStats"]["properties"]
     for field in ("label", "hit_members", "total_members", "fraction"):
         assert field in core_properties

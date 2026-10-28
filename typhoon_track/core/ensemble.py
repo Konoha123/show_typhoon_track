@@ -8,6 +8,11 @@
 - 概率半径 = 覆盖离平均位置最近 p% 成员的最小 haversine 半径；
 - 只取实际存在的时次（不插值、不外推）；不跨气旋/成员/起报时次混合统计。
 
+截断规则（M11：首个低分母时次截止，规范口径的唯一实现）：
+- low_denominator_cut_lead：完整时次序列上首个 low_denominator=True 的 lead_h（无则 None）；
+- effective_lead_profiles：前缀切片，止于首个低分母时次之前（该时次起不参与 mean 口径消费，
+  如影响统计的最近接近）；单成员轨迹 low_denominator 恒为 False，自然不截断。
+
 peak_profile（M8 终生峰值强度，口径见 docs/里程碑基线.md「M8」）：
 - 终生最大风速 = 成员全部行 wind 的 max；终生最低气压 = pressure 的 min；独立取极值、各报出现时效；
 - 出现过的成员一律以有限峰值参与统计（消散 = 行提前终止，峰值仍为有限值）；
@@ -221,6 +226,30 @@ def ensemble_profile(
             )
         )
     return profiles
+
+
+# ---------- 截断规则（M11：首个低分母时次截止的唯一规范实现） ----------
+
+
+def low_denominator_cut_lead(profiles: list[LeadProfile]) -> float | None:
+    """完整时次序列上首个低分母时次的 lead_h；无低分母时次（或空序列）为 None。
+
+    截断语义：该时次及其后的 mean 口径统计不具集合代表性（在场成员 < 30%×总数），
+    消费方应止于该时次之前（与 M5d-R1 起 web 端 mean 线截断、M5d-R11 起滑块域截断
+    同口径；M11 起为唯一规范实现，前端经 ensemble-stats 的 mean_cut_lead_h 消费）。
+    """
+    for profile in profiles:
+        if profile.low_denominator:
+            return profile.lead_h
+    return None
+
+
+def effective_lead_profiles(profiles: list[LeadProfile]) -> list[LeadProfile]:
+    """前缀切片：止于首个低分母时次之前；无低分母时次返回原序列。"""
+    cut = low_denominator_cut_lead(profiles)
+    if cut is None:
+        return profiles
+    return [profile for profile in profiles if profile.lead_h < cut]
 
 
 # ---------- 成员终生峰值（M8：peak_profile） ----------

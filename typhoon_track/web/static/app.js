@@ -1020,13 +1020,15 @@ function renderImpactCard() {
     (data.core_wind ? impactRow(data.core_wind.label, data.core_wind.fraction, data.core_wind.hit_members, data.core_wind.total_members) : '');
   const c = data.closest;
   const when = c && c.valid ? `（${c.valid.replace('T', ' ').slice(0, 16)}Z）` : '';
+  // M11a：closest 为 null 时优先展示后端 closest_note 文案（区分「截断内无有效时次」与
+  // 「全程无均值位置」，单源后端 CLOSEST_NOTE_TEXTS）；无 note 时退回泛化文案
   const closestHtml = c
     ? '<h3>最近接近（mean 口径）</h3>' +
       `<div class="impact-row"><span>时效</span><span>${c.lead_h} h${when}</span></div>` +
       `<div class="impact-row"><span>距离</span><span>${Math.round(c.distance_km)} km</span></div>` +
       `<div class="impact-row"><span>气旋方位</span><span>${escapeHtml(c.compass)}（${c.bearing_deg.toFixed(1)}°）</span></div>` +
       `<div class="impact-row"><span>强度（自算均值）</span><span>风 ${c.mean_wind == null ? '—' : c.mean_wind.toFixed(0)} kt / 压 ${c.mean_pressure == null ? '—' : c.mean_pressure.toFixed(0)} hPa</span></div>`
-    : '<p class="muted">无有效均值位置，最近接近不可用</p>';
+    : `<p class="muted">${escapeHtml(data.closest_note ?? '无有效均值位置，最近接近不可用')}</p>`;
   body.innerHTML = `<h3>目标：${escapeHtml(targetLabel())}</h3>` + rows + closestHtml;
   wrap.setAttribute('data-impact-total', String(data.thresholds[0]?.total_members ?? ''));
 }
