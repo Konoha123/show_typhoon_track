@@ -4,7 +4,8 @@
 M5d 概率特征：统计图表渲染、p 默认 100%、应用按钮确认、堆叠层级次序、
 低分母虚线、单成员模式隐藏统计卡；M5d-R12 时效滑块解耦：概率圆时次查看器
 （默认 0 档、不截断成员线/图表、单成员模式禁用）；
-M6 目标地点：预存地点下拉/坐标输入/地图点选、标记与参考圆、影响概率卡片
+M6 目标地点：预存地点内联选择器（M12 形态 II：搜索+洋区筹码+常驻列表，无原生 select
+弹层）/坐标输入/地图点选/标记与参考圆、影响概率卡片
 （含缺风圈列的显式不可用提示）；
 M7a 参考圆分级配色：左栏图例与 Canvas 像素级可见性；
 M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用；
@@ -656,10 +657,12 @@ def test_target_clear_removes_layers_and_card(page, live_url_impact: str) -> Non
     assert "hidden" in (page.locator("#impact-wrap").get_attribute("class") or "")
 
 
-def test_places_dropdown_selects_target(page, live_url_impact: str) -> None:
+def test_place_list_selects_target(page, live_url_impact: str) -> None:
+    # M12：预存地点内联选择器（形态 II）——点列表行选点（不再有原生 select 弹层）
     page.goto(live_url_impact)
     page.wait_for_selector("#storm option", state="attached")
-    page.select_option("#place-select", "那霸")
+    page.wait_for_selector("[data-place='那霸']")
+    page.click("[data-place='那霸']")
     page.wait_for_selector("[data-target-marker]", state="attached")
     assert page.locator("#target-lat").input_value() == "26.2124"
     assert page.locator("#target-lon").input_value() == "127.6809"
@@ -667,60 +670,116 @@ def test_places_dropdown_selects_target(page, live_url_impact: str) -> None:
     text = page.locator("#impact-body").inner_text()
     assert "那霸" in text  # 目标行显示预存地名
     assert text.count("0.0%") == 4  # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）
+    # 选中行高亮 + 「当前目标」行
+    assert page.locator("[data-place='那霸']").get_attribute("aria-selected") == "true"
+    assert "当前目标：那霸" in page.locator("#place-foot").inner_text()
 
 
-# ---------- M9 预存地点洋区筛选（复选框组默认全选、不跟随气旋；无地点洋区置灰） ----------
+# ---------- M9/M12 洋区筹码（承接复选框语义：默认全选、置灰、不跟随气旋）+ 内联列表 ----------
 
 
-def test_basin_filters_default_all_checked_and_greyed(page, live_url_impact: str) -> None:
+def test_basin_chips_default_all_on_and_greyed(page, live_url_impact: str) -> None:
     page.goto(live_url_impact)
     page.wait_for_selector("#storm option", state="attached")
-    page.wait_for_selector(".basin-check input")
-    boxes = page.locator(".basin-check input")
-    # 固定 8 码顺序（NA/EP/CP/WP/NI/SI/SP/SA，单源 core.basin 注入）
-    codes = page.evaluate(
-        "[...document.querySelectorAll('.basin-check input')].map((el) => el.value)"
+    page.wait_for_selector(".basin-chip")
+    chips = page.locator(".basin-chip:not(.basin-chip-reset)")
+    assert chips.count() == 8  # 地点侧 8 码固定顺序（单源 core.basin 注入）
+    states = page.evaluate(
+        """[...document.querySelectorAll('.basin-chip:not(.basin-chip-reset)')].map(
+             el => ({c: el.dataset.basin, on: el.getAttribute('aria-pressed'), dis: el.disabled,
+                     title: el.title, mark: el.hasAttribute('data-storm-basin')}))"""
     )
-    assert codes == ["NA", "EP", "CP", "WP", "NI", "SI", "SP", "SA"]
-    assert page.locator(".basin-check").count() == 8
-    # 默认全选；有地点的洋区（WP/EP）可勾选，其余禁用置灰
-    for i in range(8):
-        assert boxes.nth(i).is_checked()
-    assert boxes.nth(1).is_enabled() and boxes.nth(3).is_enabled()  # EP / WP
-    for i in (0, 2, 4, 5, 6, 7):
-        assert boxes.nth(i).is_disabled()
-    # 标签格式「代码 中文名」
-    labels = page.locator(".basin-check").all_inner_texts()
-    assert any(t.strip().startswith("WP 西北太平洋") for t in labels)
-    # 默认全选 → 下拉含全部地点
-    options = page.locator("#place-select option").all_inner_texts()
-    assert any("那霸" in t for t in options) and any("檀香山" in t for t in options)
-    # 合成前缀 SYN 未识别 → 当前气旋洋区提示隐藏
+    assert [s["c"] for s in states] == ["NA", "EP", "CP", "WP", "NI", "SI", "SP", "SA"]
+    assert all(s["on"] == "true" for s in states)  # 默认全选
+    by = {s["c"]: s for s in states}
+    assert by["EP"]["dis"] is False and by["WP"]["dis"] is False  # 有地点的洋区可点
+    for code in ("NA", "CP", "NI", "SI", "SP", "SA"):
+        assert by[code]["dis"] is True  # 无地点洋区置灰禁用
+    assert by["WP"]["title"] == "WP 西北太平洋"  # 「代码 中文名」格式
+    assert page.locator(".basin-chip-reset").count() == 0  # 默认全选无「全部」复位
+    assert all(not s["mark"] for s in states)  # SYN 前缀未识别：无气旋洋区标记
     assert "hidden" in (page.locator("#storm-basin-hint").get_attribute("class") or "")
+    # 列表默认含两地点 + 计数（文件顺序）
+    assert page.locator(".place-row").count() == 2
+    assert "共 2 项" in page.locator("#place-foot").inner_text()
 
 
-def test_basin_filters_uncheck_hides_places_keeps_visible_selection(
-    page, live_url_impact: str
-) -> None:
+def test_basin_chips_filter_places_keep_current_target(page, live_url_impact: str) -> None:
+    # M9c 语义迁移（M12）：关 EP → 檀香山移出列表；已选地点（那霸）被排除后列表不含该项、
+    # 「当前目标」行保留其名、target 不动；「全部」复位恢复
     page.goto(live_url_impact)
     page.wait_for_selector("#storm option", state="attached")
-    page.wait_for_selector(".basin-check input")
-    page.select_option("#place-select", "那霸")
-    # 取消 EP：那霸（WP）仍可见 → 保持选中
-    page.locator(".basin-check input[value='EP']").uncheck()
-    assert page.locator("#place-select").input_value() == "那霸"
-    options = page.locator("#place-select option").all_inner_texts()
-    assert any("那霸" in t for t in options)
-    assert not any("檀香山" in t for t in options)
-    # 再取消 WP：无勾选洋区地点 → 下拉清空显示占位
-    page.locator(".basin-check input[value='WP']").uncheck()
-    assert page.locator("#place-select").input_value() == ""
-    assert "无勾选洋区的地点" in page.locator("#place-select option").first.inner_text()
-    # 勾回 WP：那霸重新可见（未自动选中，占位恢复"选择预存地点"）
-    page.locator(".basin-check input[value='WP']").check()
-    options = page.locator("#place-select option").all_inner_texts()
-    assert any("那霸" in t for t in options)
-    assert "选择预存地点" in page.locator("#place-select option").first.inner_text()
+    page.wait_for_selector("[data-place='那霸']")
+    page.click("[data-place='那霸']")
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    page.click(".basin-chip[data-basin='EP']")
+    assert page.locator("[data-place='檀香山']").count() == 0
+    assert page.locator("[data-place='那霸']").count() == 1
+    assert "当前目标：那霸" in page.locator("#place-foot").inner_text()
+    # 再关 WP（那霸被排除）：列表空态 + 当前目标行保留 + 复位筹码出现
+    page.click(".basin-chip[data-basin='WP']")
+    assert page.locator(".place-row").count() == 0
+    foot = page.locator("#place-foot").inner_text()
+    assert "无勾选洋区的地点" in foot and "当前目标：那霸" in foot
+    assert page.locator(".basin-chip-reset").count() == 1
+    # target 未被改动（坐标与标记仍在）
+    assert page.locator("#target-lat").input_value() == "26.2124"
+    assert page.locator("[data-target-marker]").count() == 1
+    # 「全部」复位：列表恢复
+    page.click(".basin-chip-reset")
+    assert page.locator(".place-row").count() == 2
+    assert "共 2 项" in page.locator("#place-foot").inner_text()
+    assert page.locator(".basin-chip-reset").count() == 0
+
+
+def test_place_search_filters_list(page, live_url_impact: str) -> None:
+    # M12：搜索 = 名称/备注子串（大小写不敏感），与洋区筹码正交（交集）
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("[data-place='那霸']")
+    page.fill("#place-search", "那霸")
+    assert page.locator(".place-row").count() == 1
+    assert page.locator("[data-place='那霸']").count() == 1
+    assert "共 1 项" in page.locator("#place-foot").inner_text()
+    # 备注命中：檀香山的 note=夏威夷
+    page.fill("#place-search", "夏威夷")
+    assert page.locator("[data-place='檀香山']").count() == 1
+    assert page.locator(".place-row").count() == 1
+    # 无匹配
+    page.fill("#place-search", "不存在")
+    assert page.locator(".place-row").count() == 0
+    assert "无匹配项" in page.locator("#place-foot").inner_text()
+    # 清空恢复
+    page.fill("#place-search", "")
+    assert page.locator(".place-row").count() == 2
+
+
+def test_place_search_and_chips_intersect(page, live_url_impact: str) -> None:
+    # 正交交集：搜索「山」（命中檀香山/EP）+ 关 EP → 0 项（有勾选洋区含地点 → 无匹配项）
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("[data-place='那霸']")
+    page.fill("#place-search", "山")
+    assert page.locator("[data-place='檀香山']").count() == 1
+    page.click(".basin-chip[data-basin='EP']")
+    assert page.locator(".place-row").count() == 0
+    assert "无匹配项" in page.locator("#place-foot").inner_text()
+    # 勾回 EP 恢复
+    page.click(".basin-chip[data-basin='EP']")
+    assert page.locator("[data-place='檀香山']").count() == 1
+
+
+def test_place_keyboard_navigation_selects(page, live_url_impact: str) -> None:
+    # M12 键盘增强：搜索框 ↓ 聚焦首行（文件顺序第一项=那霸）→ Enter 原生点选
+    page.goto(live_url_impact)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("[data-place='那霸']")
+    page.focus("#place-search")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("[data-target-marker]", state="attached")
+    assert page.locator("#target-lat").input_value() == "26.2124"
+    assert page.locator("#target-lon").input_value() == "127.6809"
 
 
 def test_invalid_target_coordinates_rejected(page, live_url_impact: str) -> None:

@@ -165,8 +165,38 @@ input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
 #storm-basin-hint { margin: .35rem 0 0; }
 #storm-basin-hint.hidden { display: none; }
 /* 复选框组：两列紧凑网格（8 码固定顺序渲染）；覆盖全局 label 的块级与边距 */
-.basin-filters { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem .4rem; margin: .3rem 0 .1rem; }
-.basin-check { display: flex; align-items: center; gap: .3rem; font-size: .76rem; color: #555; margin: 0; }
-.basin-check input { margin: 0; accent-color: #2563eb; }
-/* 无对应地点的洋区：禁用置灰（不可勾选） */
-.basin-check:has(input:disabled) { color: #b8bcc4; }
+/* M12：预存地点内联选择器（搜索 + 洋区筹码 + 常驻列表；无原生 select 弹层） */
+.basin-chips { display: flex; flex-wrap: wrap; gap: .25rem; margin: .3rem 0 .1rem; }
+.basin-chip {
+  width: auto; margin: 0; padding: 1px 9px; font-size: .74rem; line-height: 1.55;
+  background: #eef2f7; color: #334155; border: 1px solid #c9d2dd; border-radius: 999px; cursor: pointer;
+}
+.basin-chip:hover { background: #e2e8f0; }
+.basin-chip[aria-pressed="true"] { background: #2563eb; border-color: #2563eb; color: #fff; }
+.basin-chip[aria-pressed="true"]:hover { background: #1d4ed8; }
+.basin-chip:disabled { opacity: .45; cursor: not-allowed; }
+.basin-chip[data-storm-basin] { border-color: #0f172a; box-shadow: 0 0 0 1px #0f172a; } /* 当前气旋洋区仅视觉标记 */
+.basin-chip-reset { background: #fff; color: #2563eb; border-style: dashed; }
+.basin-chip-reset:hover { background: #eff6ff; }
+.place-list {
+  margin-top: .35rem; border: 1px solid #d8d8d8; border-radius: 4px; background: #fff;
+  max-height: 200px; overflow-y: auto;
+}
+.place-list:empty { display: none; }
+.place-row {
+  display: block; width: 100%; box-sizing: border-box; margin: 0; padding: .22rem .45rem;
+  background: #fff; color: #222; border: 0; border-left: 3px solid transparent; border-radius: 0;
+  font-size: .82rem; text-align: left; cursor: pointer;
+}
+.place-row:hover, .place-row:focus { background: #eff6ff; border-left-color: #93c5fd; outline: none; }
+.place-row[aria-selected="true"] { background: #eff6ff; border-left-color: #2563eb; font-weight: 600; }
+.place-row-main { display: flex; justify-content: space-between; align-items: center; gap: .4rem; }
+.place-row-note {
+  display: block; font-size: .72rem; color: #667; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.basin-badge {
+  flex: none; font-size: .68rem; font-weight: 400; color: #556; background: #f1f5f9;
+  border: 1px solid #dde3ea; border-radius: 4px; padding: 0 5px;
+}
+#place-foot { margin-top: .25rem; }

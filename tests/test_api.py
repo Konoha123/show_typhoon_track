@@ -52,11 +52,14 @@ def test_index_page_renders(client: TestClient) -> None:
     assert 'id="p-apply"' in response.text
     for card in ("pressure-wrap", "stack-wrap", "radius-wrap"):
         assert f'id="{card}"' in response.text
-    # M9：洋区码表注入（单源 core.basin）+ 复选框组与气旋洋区提示锚点
+    # M9：洋区码表注入（单源 core.basin）+ 气旋洋区提示锚点；M12：内联选择器锚点
     assert "window.BASIN_CATALOG" in response.text
     assert '"code": "NA"' in response.text
     assert '"cycloneOnly": true' in response.text
-    assert 'id="basin-filters"' in response.text
+    assert 'id="basin-chips"' in response.text
+    assert 'id="place-search"' in response.text
+    assert 'id="place-list"' in response.text
+    assert 'id="place-foot"' in response.text
     assert 'id="storm-basin-hint"' in response.text
 
 

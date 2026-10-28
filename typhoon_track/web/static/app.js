@@ -39,6 +39,7 @@ const state = {
   stats: null, pSelected: '100', pApplied: '100', selectedKeyLead: null,
   target: null, places: null, impact: null,
   basinsChecked: null, // M9：勾选的洋区码集合（Set）；null=未初始化，首次渲染默认全选
+  placeQuery: '', stormBasin: null, // M12：地点搜索词；当前气旋洋区码（筹码视觉标记，未识别 null）
   peaks: null, peaksOpen: false, // M8：终生峰值载荷与第四栏开合态（默认隐藏）
 };
 
@@ -972,6 +973,7 @@ function setTarget(lat, lon, label) {
   $('target-lat').value = String(state.target.lat);
   $('target-lon').value = String(state.target.lon);
   renderTargetLayer();
+  renderPlaceList(); // M12：列表选中高亮与「当前目标」行同步
   setStatus(`目标地点：${targetLabel()}`);
   void loadImpact();
 }
@@ -981,7 +983,7 @@ function clearTarget() {
   state.impact = null;
   $('target-lat').value = '';
   $('target-lon').value = '';
-  $('place-select').value = '';
+  renderPlaceList(); // M12：清除选中高亮与「当前目标」行
   targetLayer.clearLayers();
   $('map').removeAttribute('data-target-circles');
   renderImpactCard();
@@ -1049,12 +1051,15 @@ async function loadPlaces() {
   } catch (err) {
     state.places = { available: false, places: [], warnings: [`预存地点获取失败：${err.message}`] };
   }
-  renderBasinFilters();
+  renderPlacePicker();
   $('place-warnings').textContent = (state.places?.warnings ?? []).join('\n');
 }
 
-/* M9：当前气旋洋区提示（「当前气旋洋区：WP 西北太平洋」；无洋区时隐藏，不臆造） */
+/* M9：当前气旋洋区提示（「当前气旋洋区：WP 西北太平洋」；无洋区时隐藏，不臆造）。
+ * M12：同步记入 state.stormBasin 并刷新筹码视觉标记（仅提示，不改变过滤语义）。 */
 function updateStormBasinHint(basin) {
+  state.stormBasin = basin ?? null;
+  if (document.querySelector('.basin-chip')) renderBasinChips();
   const hint = $('storm-basin-hint');
   if (!basin) {
     hint.classList.add('hidden');
@@ -1065,53 +1070,110 @@ function updateStormBasinHint(basin) {
   hint.classList.remove('hidden');
 }
 
-/* M9 洋区筛选：复选框组（地点侧 8 码固定顺序，默认全选；无对应地点的洋区禁用置灰）。
- * 勾选变化只过滤地点下拉，不跟随气旋；热重载后保持勾选集合（码表单源不漂移）。 */
-function renderBasinFilters() {
-  const box = $('basin-filters');
+/* M12：预存地点内联选择器（形态 II）——洋区筹码组 + 常驻列表，无原生 select 弹层
+ * （缺陷归因见 docs/M12预存地点下拉缺陷归因与复现记录_20261028.md）。
+ * 筹码承接 M9 复选框全部语义：8 码固定顺序、默认全选、无地点洋区置灰禁用、
+ * 勾选集跨渲染持久（含热重载）、不跟随气旋（气旋洋区仅视觉标记 data-storm-basin）；
+ * 筹码数字 = 该洋区预存地点数。 */
+function renderBasinChips() {
+  const box = $('basin-chips');
   const places = state.places?.places ?? [];
   const counts = new Map();
   for (const p of places) counts.set(p.basin, (counts.get(p.basin) ?? 0) + 1);
+  const codes = BASIN_CATALOG.filter((b) => !b.cycloneOnly);
   if (!state.basinsChecked) {
-    state.basinsChecked = new Set(BASIN_CATALOG.filter((b) => !b.cycloneOnly).map((b) => b.code));
+    state.basinsChecked = new Set(codes.map((b) => b.code));
   }
+  const allOn = codes.every((b) => state.basinsChecked.has(b.code));
   box.innerHTML = '';
-  for (const basin of BASIN_CATALOG) {
-    if (basin.cycloneOnly) continue; // SH 等气旋侧粗码不进复选框
+  for (const basin of codes) {
     const count = counts.get(basin.code) ?? 0;
-    const label = document.createElement('label');
-    label.className = 'basin-check';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.value = basin.code;
-    checkbox.checked = state.basinsChecked.has(basin.code);
-    checkbox.disabled = count === 0;
-    checkbox.dataset.basin = basin.code;
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) state.basinsChecked.add(basin.code);
-      else state.basinsChecked.delete(basin.code);
-      fillPlaceSelect();
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'basin-chip';
+    chip.dataset.basin = basin.code;
+    chip.title = basin.label; // 「代码 中文名」格式（单源注入的 BASIN_CATALOG）
+    chip.setAttribute('aria-pressed', String(state.basinsChecked.has(basin.code)));
+    chip.disabled = count === 0; // 无地点洋区置灰禁用（M9 语义）
+    if (state.stormBasin === basin.code) chip.dataset.stormBasin = '1'; // Q4：仅视觉标记
+    chip.textContent = `${basin.code} ${count}`;
+    chip.addEventListener('click', () => {
+      if (state.basinsChecked.has(basin.code)) state.basinsChecked.delete(basin.code);
+      else state.basinsChecked.add(basin.code);
+      renderPlacePicker();
     });
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode(` ${basin.label}`));
-    box.appendChild(label);
+    box.appendChild(chip);
   }
-  fillPlaceSelect();
+  if (!allOn) {
+    const reset = document.createElement('button'); // 任一关闭时出现「全部」复位
+    reset.type = 'button';
+    reset.className = 'basin-chip basin-chip-reset';
+    reset.textContent = '全部';
+    reset.title = '恢复全部洋区';
+    reset.addEventListener('click', () => {
+      state.basinsChecked = new Set(codes.map((b) => b.code));
+      renderPlacePicker();
+    });
+    box.appendChild(reset);
+  }
 }
 
-/* 按勾选洋区过滤地点下拉；当前已选地点若仍可见则保持选中 */
-function fillPlaceSelect() {
+/* M12：常驻地点列表 = 勾选洋区 ∩ 搜索词（名称/备注，大小写不敏感子串）；文件顺序。
+ * 已选地点被筹码排除时列表不含该项，但「当前目标」行保留其名（M9c 语义迁移）；
+ * 空态文案三态：无预存地点（选择器整体禁用）/ 无勾选洋区的地点 / 无匹配项。 */
+function renderPlaceList() {
+  const box = $('place-list');
   const all = state.places?.places ?? [];
-  const list = all.filter((p) => state.basinsChecked?.has(p.basin) ?? true);
-  const previous = $('place-select').value;
-  const placeholder = !all.length
-    ? '— 无预存地点（填坐标或地图点选）—'
-    : (list.length ? '— 选择预存地点 —' : '— 无勾选洋区的地点 —');
-  const options = [{ value: '', label: placeholder }].concat(
-    list.map((p) => ({ value: p.name, label: p.note ? `${p.name}（${p.note}）` : p.name })),
-  );
-  fillSelect($('place-select'), options, false);
-  if (previous && options.some((o) => o.value === previous)) $('place-select').value = previous;
+  const query = state.placeQuery.trim().toLowerCase();
+  const inBasin = all.filter((p) => state.basinsChecked?.has(p.basin) ?? true);
+  const list = query
+    ? inBasin.filter((p) => p.name.toLowerCase().includes(query)
+      || (p.note ?? '').toLowerCase().includes(query))
+    : inBasin;
+  const disabled = !all.length;
+  $('place-search').disabled = disabled;
+  box.innerHTML = '';
+  box.setAttribute('aria-disabled', String(disabled));
+  const emptyText = !all.length
+    ? null // 无预存地点：整体禁用，文案由 foot 呈现
+    : (!inBasin.length ? '— 无勾选洋区的地点 —' : (!list.length ? '无匹配项' : null));
+  for (const p of list) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'place-row';
+    row.dataset.place = p.name; // E2E/调试锚点
+    row.setAttribute('role', 'option');
+    if (state.target?.label === p.name) row.setAttribute('aria-selected', 'true');
+    const main = document.createElement('span');
+    main.className = 'place-row-main';
+    const name = document.createElement('span');
+    name.textContent = p.name;
+    const badge = document.createElement('span');
+    badge.className = 'basin-badge';
+    badge.textContent = p.basin; // 纯展示（不参与搜索/过滤，洋区过滤唯一入口是筹码）
+    main.appendChild(name);
+    main.appendChild(badge);
+    row.appendChild(main);
+    if (p.note) {
+      const note = document.createElement('span');
+      note.className = 'place-row-note';
+      note.textContent = p.note;
+      row.appendChild(note);
+    }
+    row.addEventListener('click', () => setTarget(p.lat, p.lon, p.name));
+    box.appendChild(row);
+  }
+  const foot = [];
+  if (emptyText) foot.push(emptyText);
+  else if (list.length) foot.push(`共 ${list.length} 项`);
+  else foot.push('— 无预存地点（填坐标或地图点选）—');
+  if (state.target?.label) foot.push(`当前目标：${state.target.label}`);
+  $('place-foot').textContent = foot.join(' · ');
+}
+
+function renderPlacePicker() {
+  renderBasinChips();
+  renderPlaceList();
 }
 
 /* ---------- M8 终生峰值：聚合卡（第三栏，强度分布图下方）+ 每成员明细第四栏（默认隐藏） ---------- */
@@ -1608,12 +1670,31 @@ $('obs-dataset').addEventListener('change', onObsChange);
 $('peak-toggle').addEventListener('click', () => setPeakPanelOpen(!state.peaksOpen));
 $('peak-close').addEventListener('click', () => setPeakPanelOpen(false));
 
-/* M6 目标地点：预存地点下拉 / 坐标应用（Enter 同效）/ 地图点选开关 / 清除 */
-$('place-select').addEventListener('change', () => {
-  const name = $('place-select').value;
-  if (!name) return;
-  const place = (state.places?.places ?? []).find((p) => p.name === name);
-  if (place) setTarget(place.lat, place.lon, place.name);
+/* M6/M12 目标地点：预存地点内联选择器（搜索/筹码/列表行点选）/ 坐标应用（Enter 同效）/
+ * 地图点选开关 / 清除 */
+$('place-search').addEventListener('input', () => {
+  state.placeQuery = $('place-search').value;
+  renderPlaceList();
+});
+$('place-search').addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.placeQuery) { // Esc 先清搜索词（再按无副作用）
+    state.placeQuery = '';
+    $('place-search').value = '';
+    renderPlaceList();
+  } else if (event.key === 'ArrowDown') { // 键盘增强：进入列表首项（行上 Enter/Space 原生点选）
+    const first = document.querySelector('.place-row');
+    if (first) { first.focus(); event.preventDefault(); }
+  }
+});
+$('place-list').addEventListener('keydown', (event) => {
+  const rows = [...document.querySelectorAll('.place-row')];
+  const idx = rows.indexOf(document.activeElement);
+  if (event.key === 'ArrowDown' && rows[idx + 1]) { rows[idx + 1].focus(); event.preventDefault(); }
+  else if (event.key === 'ArrowUp') {
+    if (rows[idx - 1]) rows[idx - 1].focus();
+    else $('place-search').focus();
+    event.preventDefault();
+  }
 });
 function applyTargetInputs() {
   const lat = Number.parseFloat($('target-lat').value.trim());
