@@ -12,13 +12,16 @@ M7b 接口调用轻量加载提示：状态栏 busy 文案与上传按钮禁用�
 M7c 位置概率半径图表暂隐藏：渲染停用但锚点与数据链路保留；
 M8 终生峰值：第三栏聚合卡（强度分布图下方）+ 每成员明细第四栏（默认隐藏、卡内入口展开）；
 M7f 反经线（跨 180° 经线）绘制：成员线/均值轨迹/观测叠加走最短方向
-（zoom 无关形状比断言，合成数据 signed 口径 179.0 -> -178.1 跳变）。
+（zoom 无关形状比断言，合成数据 signed 口径 179.0 -> -178.1 跳变）；
+M13 经纬网格：预设 zoom 档位表（度数标注契约）、缩放档位切换、开关隐藏/恢复、
+世界副本视图（window.__map 测试钩子 setView/setZoom）。
 依赖：requirements-dev 中的 pytest-playwright；首次使用需
 `python -m playwright install chromium`。未安装 Playwright 的环境整文件自动跳过。
 """
 
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -871,11 +874,13 @@ def _max_path_wrap_ratio(page) -> float:
     实测修复前 ≈ 0.993，占世界宽 99.3%）；正常逐时次推进的轨迹相邻步长
     远小于总跨度（本用例 ≈ 0.34）。只解析纯 M/L 折线（圆类 path 含 a/m 弧
     命令，数值无步长语义，跳过）；引线（data-mean-leader，两点连线）天然
-    比值为 1，排除。
+    比值为 1，排除；M13 经纬网格参考层（.graticule-line，纬线为两点横线、
+    比值恒为 1，与轨迹几何无关）同样排除。
     """
     return page.evaluate(
         """() => {
-          const paths = [...document.querySelectorAll('#map svg path[d]:not([data-mean-leader])')];
+          const paths = [...document.querySelectorAll(
+            '#map svg path[d]:not([data-mean-leader]):not(.graticule-line)')];
           let worst = 0;
           for (const p of paths) {
             const d = p.getAttribute('d');
@@ -1018,3 +1023,101 @@ def test_peak_panel_sentinel_member_shows_dash(page, live_url_peak: str) -> None
     assert float(agg.get_attribute("data-peak-wind-mean")) == pytest.approx(37.5)
     assert float(agg.get_attribute("data-peak-pressure-median")) == pytest.approx(1002.0)
     assert "2/3" in page.locator("#peak-agg-wrap").inner_text()
+
+
+# ---------- M13 经纬网格：预设 zoom 档位表 + 度数标注 + 开关 + 世界副本 ----------
+
+
+_GRATICULE_LABEL_RE = re.compile(r"^(\d+(?:\.\d+)?)°(?:[NSEW])?$")
+
+
+def _graticule_label_values(page) -> list[float]:
+    values: list[float] = []
+    for el in page.locator(".graticule-label").all():
+        text = el.inner_text().strip()
+        m = _GRATICULE_LABEL_RE.match(text)
+        assert m is not None, f"标注格式不符：{text}"
+        values.append(float(m.group(1)))
+    return values
+
+
+def _wait_graticule(page) -> None:
+    # 按 DOM 计数等待（首条 path 可能是边距外扩的屏外线，可见性等待会误判超时）
+    page.wait_for_function("() => document.querySelectorAll('.graticule-line').length > 0")
+
+
+def test_graticule_default_on_with_tier_labels(page, live_url: str) -> None:
+    # 默认开：载入即有线与标注（不依赖任何数据交互）；档位表契约：z4 → 5° 档，
+    # 经/纬标注均为 5 的整数倍（0°/180° 无后缀，副本经度以 signed 口径显示）
+    _open_workbench(page, live_url)
+    assert page.locator("#graticule-toggle").is_checked()
+    assert page.locator(".graticule-line").count() > 0
+    assert page.locator(".graticule-label").count() > 0
+    page.wait_for_timeout(600)  # 等 fitBounds 视图稳定（app.js 渲染链动画）再定视图
+    page.evaluate("window.__map.setView([22, 132], 4)")
+    # 复合谓词（zoom 到位 + 档位成立）排除旧档标注的瞬态误判
+    page.wait_for_function(
+        """() => window.__map.getZoom() === 4
+            && [...document.querySelectorAll('.graticule-label')]
+                .every(el => (parseFloat(el.textContent) % 5) === 0)"""
+    )
+    values = _graticule_label_values(page)
+    assert values and all(v % 5 == 0 for v in values), values
+    texts = [t.strip() for t in page.locator(".graticule-label").all_inner_texts()]
+    assert any(t.endswith(("E", "W")) for t in texts)  # 经线标注沿顶边
+    assert any(t.endswith(("N", "S")) for t in texts)  # 纬线标注沿左边
+    assert "0°" in texts  # 视野含赤道：纬向无后缀特例（地图区实际宽约 520px，z4 视野 ±23°）
+
+
+def test_graticule_tier_changes_with_zoom(page, live_url: str) -> None:
+    # 档位表契约：z6 → 2° 档（全偶数），z4 → 5° 档（5 的整数倍）
+    _open_workbench(page, live_url)
+    page.wait_for_timeout(600)  # 等 fitBounds 视图稳定
+    page.evaluate("window.__map.setZoom(6)")
+    page.wait_for_function(
+        """() => window.__map.getZoom() === 6
+            && [...document.querySelectorAll('.graticule-label')]
+                .every(el => (parseFloat(el.textContent) % 2) === 0)"""
+    )
+    values = _graticule_label_values(page)
+    assert all(v % 2 == 0 for v in values), values
+    page.evaluate("window.__map.setZoom(4)")
+    page.wait_for_function(
+        """() => window.__map.getZoom() === 4
+            && [...document.querySelectorAll('.graticule-label')]
+                .every(el => (parseFloat(el.textContent) % 5) === 0)"""
+    )
+    values = _graticule_label_values(page)
+    assert all(v % 5 == 0 for v in values), values
+
+
+def test_graticule_toggle_hides_and_restores(page, live_url: str) -> None:
+    # 开关关闭即清空线与标注；关闭期间移动视图不重建（开关短路）；恢复即按当前视图重建
+    _open_workbench(page, live_url)
+    _wait_graticule(page)
+    assert page.locator(".graticule-label").count() > 0
+    page.uncheck("#graticule-toggle")
+    assert page.locator(".graticule-line").count() == 0
+    assert page.locator(".graticule-label").count() == 0
+    page.evaluate("window.__map.panBy([120, 0])")
+    page.wait_for_timeout(400)  # 等 moveend：重建按开关短路，保持清空
+    assert page.locator(".graticule-line").count() == 0
+    page.check("#graticule-toggle")
+    _wait_graticule(page)
+    assert page.locator(".graticule-label").count() > 0
+
+
+def test_graticule_world_copy_view(page, live_url: str) -> None:
+    # 副本视图（中心经 185 ≡ -175°）：网格与标注仍按档位渲染，跨 180° 沿副本连续区间
+    # （与 M7f 展开后绘于 ±180° 之外副本的轨迹对齐）；z5 档位 5°，经 185 → signed「175°W」
+    _open_workbench(page, live_url)
+    page.wait_for_timeout(600)  # 等 fitBounds 视图稳定
+    page.evaluate("window.__map.setView([20, 185], 5)")
+    page.wait_for_function(
+        """() => window.__map.getZoom() === 5
+            && [...document.querySelectorAll('.graticule-label')]
+                .some(el => el.textContent.trim() === '175°W')"""
+    )
+    values = _graticule_label_values(page)
+    assert values and all(v % 5 == 0 for v in values), values
+    assert page.locator(".graticule-line").count() > 0

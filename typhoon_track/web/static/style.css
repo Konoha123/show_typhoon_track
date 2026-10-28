@@ -200,3 +200,18 @@ input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
   border: 1px solid #dde3ea; border-radius: 4px; padding: 0 5px;
 }
 #place-foot { margin-top: .25rem; }
+
+/* ---------- M13 经纬网格 ---------- */
+/* 网格线：细白线（ESRI 影像底图可读）；SVG 渲染器容器已整体关闭指针事件，
+   此处对 path 再作双保险，确保不拦截空白点击取消选中等既有交互 */
+.graticule-line { stroke: rgba(255, 255, 255, .45); stroke-width: 1; fill: none; pointer-events: none; }
+/* 边缘度数标注：小号白字 + 深色光晕（影像底图可读）；64×14 定宽盒由 divIcon 尺寸给定 */
+.graticule-label {
+  font-size: 10px; line-height: 14px; color: #fff; text-align: center;
+  white-space: nowrap; pointer-events: none;
+  text-shadow: 0 0 3px rgba(0, 0, 0, .95), 0 0 3px rgba(0, 0, 0, .95);
+}
+.graticule-label-lat { text-align: left; }
+/* 左栏开关行内复选框（M13）：label 与 checkbox 同行 */
+.inline-check { display: flex; align-items: center; gap: .45rem; }
+.inline-check input[type="checkbox"] { width: auto; margin: .3rem 0 .1rem; }

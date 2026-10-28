@@ -41,6 +41,7 @@ const state = {
   basinsChecked: null, // M9：勾选的洋区码集合（Set）；null=未初始化，首次渲染默认全选
   placeQuery: '', stormBasin: null, // M12：地点搜索词；当前气旋洋区码（筹码视觉标记，未识别 null）
   peaks: null, peaksOpen: false, // M8：终生峰值载荷与第四栏开合态（默认隐藏）
+  graticuleOn: true, // M13：经纬网格开关（会话内内存态，默认开，不持久化）
 };
 
 const $ = (id) => document.getElementById(id);
@@ -145,6 +146,121 @@ map.on('moveend zoomend resize', () => {
   clearTimeout(statsAnchorRetimer);
   statsAnchorRetimer = setTimeout(updateStatsAnchors, 300);
 });
+
+/* ---------- M13 经纬网格（含度数标注） ---------- */
+/* 预设 zoom→档位映射（实现前定案，渲染期只查表不适应）：取阶梯中满足
+ * 「邻线像素距 = 档位 × 256·2^z/360 ≥ 48px」的最小档（48px = 最长标注「134.2°E」
+ * ≈45px + 间隙）；Web Mercator 邻线像素距仅取决于 zoom、与视口宽无关（视口只决定
+ * 可见条数），故档位表以 zoom 为自变量即对所有视口成立。z0–1 多世界视图关闭标注
+ * （30° 档邻线距 21/43px 不足），z≥10 钳制 0.1°（用户定案：更密无意义）。 */
+const GRATICULE_TIERS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 30]; // 度（细→粗升序，与档位表自上而下对应）
+const GRATICULE_LABEL_MIN_PX = 48;
+const GRATICULE_LABEL_MIN_ZOOM = 2;
+const GRATICULE_LAT_MAX = 85; // Web Mercator 纬向极限（极点无定义）
+const GRATICULE_LON_LABEL_TOP_PX = 8; // 经线标注：顶边内缩（向下占位）
+const GRATICULE_LAT_LABEL_LEFT_PX = 6; // 纬线标注：左边内缩（向右占位）
+const GRATICULE_ZOOM_CONTROL_CLEAR_PX = 48; // 顶边标注起点避开左上缩放控件
+
+function graticuleInterval(zoom) {
+  const pxPerDeg = (256 * 2 ** zoom) / 360;
+  // 升序阶梯取首个满足最小邻线距的最细档（更细档间距不足、标注会碰撞）；
+  // z0–1 无档满足 → 回退最粗 30°（标注已由 GRATICULE_LABEL_MIN_ZOOM 关闭）
+  for (const tier of GRATICULE_TIERS) {
+    if (tier * pxPerDeg >= GRATICULE_LABEL_MIN_PX) return tier;
+  }
+  return GRATICULE_TIERS[GRATICULE_TIERS.length - 1];
+}
+
+function graticuleLatLabel(lat, decimals) {
+  const value = Number(lat.toFixed(decimals));
+  if (value === 0) return '0°';
+  return `${Math.abs(value).toFixed(decimals)}°${value > 0 ? 'N' : 'S'}`;
+}
+
+function graticuleLonLabel(lon, decimals) {
+  const value = Number(toSignedLon(lon).toFixed(decimals)); // 副本空间经度 → signed 口径
+  if (Math.abs(value) === 180) return '180°';
+  if (value === 0) return '0°';
+  return `${Math.abs(value).toFixed(decimals)}°${value > 0 ? 'E' : 'W'}`;
+}
+
+/* 网格独立 pane（z=350：瓦片之上、全部矢量叠加之下——moveend 全量重建不改变层序）
+ * + 标注 pane（z=450：矢量之上、交互标记 600 之下）；SVG 保留逐线 path DOM 供 E2E
+ * 断言（Canvas 无 per-line DOM，故不仿 statsCircleRenderer）；renderer padding=1
+ * （外扩一个视口）与线绘制边距一致 */
+map.createPane('graticule').style.zIndex = '350';
+map.createPane('graticule-labels').style.zIndex = '450';
+const graticuleRenderer = L.svg({ pane: 'graticule', padding: 1 });
+graticuleRenderer.on('add', () => {
+  // 渲染器容器整体关闭指针事件（沿 statsCircleRenderer 先例）：避免拦截空白点击取消选中
+  graticuleRenderer._container.style.pointerEvents = 'none';
+});
+const graticuleLayer = L.layerGroup().addTo(map);
+window.__map = map; // E2E 测试钩子：setView/setZoom 确定性操作（跨副本视图无 DOM 手段）
+
+function renderGraticule() {
+  graticuleLayer.clearLayers();
+  if (!state.graticuleOn) return; // 开关关闭：保持清空（moveend 重建同样短路）
+  const zoom = Math.round(map.getZoom());
+  const interval = graticuleInterval(zoom);
+  const decimals = interval < 1 ? 1 : 0;
+  const size = map.getSize();
+  // 视口角点 → 副本空间连续经/纬区间（unproject 不回卷经度：跨 180° 与世界副本为
+  // 连续值，网格线无需展开），各外扩一个视口：覆盖 worldCopyJump 跳回前的拖拽过程
+  // 与 M7f 展开后绘于 ±180° 之外副本的轨迹区
+  const sw = map.containerPointToLatLng([0, size.y]);
+  const ne = map.containerPointToLatLng([size.x, 0]);
+  const west = sw.lng - (ne.lng - sw.lng);
+  const east = ne.lng + (ne.lng - sw.lng);
+  const south = Math.max(sw.lat - (ne.lat - sw.lat), -GRATICULE_LAT_MAX);
+  const north = Math.min(ne.lat + (ne.lat - sw.lat), GRATICULE_LAT_MAX);
+  const lineOptions = { renderer: graticuleRenderer, interactive: false, className: 'graticule-line' };
+  // 经线逐条竖线 + 纬线单段横线；索引步进避免 0.1 档累加浮点漂移
+  for (let i = Math.ceil(west / interval); i * interval <= east; i += 1) {
+    L.polyline([[south, i * interval], [north, i * interval]], lineOptions).addTo(graticuleLayer);
+  }
+  for (let i = Math.ceil(south / interval); i * interval <= north; i += 1) {
+    L.polyline([[i * interval, west], [i * interval, east]], lineOptions).addTo(graticuleLayer);
+  }
+  if (zoom < GRATICULE_LABEL_MIN_ZOOM) return; // z0–1 多世界视图：线在、标注关
+  // 标注贴当前视口边缘：经线沿顶边（起点避开左上缩放控件），纬线沿左边
+  const topLat = Math.max(
+    -GRATICULE_LAT_MAX,
+    Math.min(GRATICULE_LAT_MAX, map.containerPointToLatLng([0, GRATICULE_LON_LABEL_TOP_PX]).lat),
+  );
+  const leftLon = map.containerPointToLatLng([GRATICULE_LAT_LABEL_LEFT_PX, 0]).lng;
+  for (let i = Math.ceil(west / interval); i * interval <= east; i += 1) {
+    const lon = i * interval;
+    const x = map.latLngToContainerPoint([topLat, lon]).x;
+    if (x < GRATICULE_ZOOM_CONTROL_CLEAR_PX || x > size.x) continue;
+    L.marker([topLat, lon], {
+      pane: 'graticule-labels', interactive: false, keyboard: false,
+      icon: L.divIcon({
+        className: 'graticule-label graticule-label-lon',
+        html: graticuleLonLabel(lon, decimals),
+        iconSize: [64, 14], iconAnchor: [32, 0],
+      }),
+    }).addTo(graticuleLayer);
+  }
+  for (let i = Math.ceil(south / interval); i * interval <= north; i += 1) {
+    const lat = i * interval;
+    const y = map.latLngToContainerPoint([lat, leftLon]).y;
+    if (y < 0 || y > size.y) continue;
+    L.marker([lat, leftLon], {
+      pane: 'graticule-labels', interactive: false, keyboard: false,
+      icon: L.divIcon({
+        className: 'graticule-label graticule-label-lat',
+        html: graticuleLatLabel(lat, decimals),
+        iconSize: [64, 14], iconAnchor: [0, 7],
+      }),
+    }).addTo(graticuleLayer);
+  }
+}
+
+/* 手势结束当拍重建（无防抖：几十条线+几十个标注的同步 DOM 操作为毫秒级，无可感知
+ * 延迟）；zoom 动画结束必触发 moveend，无需单列 zoomend */
+map.on('moveend resize', renderGraticule);
+renderGraticule();
 
 function pointCoords(row) {
   if (row.lat == null) return null;
@@ -1665,6 +1781,12 @@ $('lead').addEventListener('input', () => {
   render(); // M5d-R12：仅移动"当前时次"概率圆（成员线/图表全程，互不影响）
 });
 $('obs-dataset').addEventListener('change', onObsChange);
+
+/* M13 经纬网格开关：关闭即清空（moveend 重建按开关短路），恢复即按当前视图重建 */
+$('graticule-toggle').addEventListener('change', () => {
+  state.graticuleOn = $('graticule-toggle').checked;
+  renderGraticule();
+});
 
 /* M8 终生峰值：聚合卡内「每成员明细」入口双向切换（展开/收起第四栏）；面板内「收起」等效 */
 $('peak-toggle').addEventListener('click', () => setPeakPanelOpen(!state.peaksOpen));

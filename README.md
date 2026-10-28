@@ -2,7 +2,7 @@
 
 基于 Google Weather Lab / WeatherNext Cyclones (WNC) 热带气旋预报数据，构建一套**导入 → 解析 → 交互式网页可视化**的工具：用户在页面上导入预报轨迹 CSV，系统解析后在地图上展示气旋路径与强度，并叠加基础交互功能。必要时采用前后端分离方案。
 
-> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点内联选择器）、服务简单入口与 configs 统一、mean 口径截断统一（最近接近修复 + 截断规则后端单源）已落地（M1–M12）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
+> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点内联选择器 + 经纬网格）、服务简单入口与 configs 统一、mean 口径截断统一（最近接近修复 + 截断规则后端单源）已落地（M1–M13）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
 
 ## 目录结构
 
@@ -90,6 +90,7 @@ python app.py
 # 监听地址与端口在 configs/server.json 配置（pydantic 校验，缺文件报错退出）；CSV CLI 为 python -m typhoon_track，两入口不冲突
 # 浏览器访问 http://127.0.0.1:8000 ：
 #   - 上传预报/观测 CSV（双入口）→ 选择气旋/起报/成员 → 地图渲染轨迹
+#   - 地图叠加经纬网格与度数标注（M13：密度随缩放按预设档位表分档，左栏「地图图层」可开关，默认开）
 #   - 成员"全部"为意面图；单成员按强度着色点位；观测轨迹黑虚线叠加；概率圆时次滑块只取实际存在档位（默认 0 档、仅移动当前时次高亮概率圆，不截断成员线/图表；上限截断于首个低分母时次，尾部消散成员不画概率圆；单成员模式禁用）
 #   - 第三栏强度分布图下方「终生峰值强度」卡：每成员终生峰值的上中位/平均；
 #     卡内「每成员明细」按钮展开最右侧明细栏（成员、峰值风速/气压与出现时效；
@@ -151,7 +152,7 @@ python -m compileall -q typhoon_track  # L0 语法编译
 ruff check --no-fix .                 # L1 静态缺陷
 pyright                               # L2 静态类型
 python -m pip check && deptry . && lint-imports   # L3 依赖与架构
-python -m pytest -q                   # L5 功能测试（271 项基线，含 Playwright UI E2E）
+python -m pytest -q                   # L5 功能测试（275 项基线，含 Playwright UI E2E）
 ```
 
 ## 路线图
@@ -168,6 +169,7 @@ python -m pytest -q                   # L5 功能测试（271 项基线，含 Pl
 - ✅ **服务简单入口与 configs 统一（M10）**：根目录 `python app.py` 薄封装启动 Web 服务（`configs/server.json` pydantic JSON 解析 host/port，缺文件报错退出；与 `python -m uvicorn ...` 并列）；运行时配置统一 `configs/`（tiles.toml + server.json；places/uploads 属运行时数据不迁入）
 - ✅ **mean 口径截断统一（M11）**：`core.ensemble` 截断规则纯函数（`low_denominator_cut_lead`，唯一规范实现）→ `ensemble-stats` 响应 `mean_cut_lead_h` → 前端地图 mean 线/时效滑块域/强度图/气压图均值线统一消费（成员细线不截断）；最近接近（mean 口径）限截断内时次，极端全低分母 closest=null 并以 `closest_note` 说明原因
 - ✅ **预存地点内联选择器（M12）**：搜索名称/备注 + 洋区筹码（承接 M9 复选框语义，含计数/置灰/持久勾选/气旋洋区标记）+ 常驻列表（文件顺序、已选高亮、当前目标行）；弃用原生 select 弹层（真实输入管道缺陷归因与 Chromium 上报素材见 `docs/M12预存地点下拉缺陷归因与复现记录_20261028.md`）
+- ✅ **地图经纬网格（M13）**：预设 zoom→档位表（z4=5°…z≥10=0.1°，渲染期只查表）+ 度数标注（紧凑式、贴视口边缘）；独立图层居瓦片之上/轨迹之下，跨 180° 与世界副本连续绘制；左栏「地图图层」开关默认开（档位表与问题处置见 `docs/M13经纬网格验收记录_20261028.md`）
 - 📋 **候补**：跨数据集叠加对比、瓦片数据源切换等
 
 开发用里程碑基线（状态、提交、依赖与验收要点）见 [docs/里程碑基线.md](./docs/里程碑基线.md)。

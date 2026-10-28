@@ -6,8 +6,8 @@
 <title>WNC 台风轨迹工作台</title>
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M12b 前端改动 bump m12 -->
-<link rel="stylesheet" href="/static/style.css?v=m12">
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M13 前端改动 bump m13 -->
+<link rel="stylesheet" href="/static/style.css?v=m13">
 </head>
 <body>
 <aside id="panel">
@@ -31,6 +31,12 @@
     <select id="fc-dataset"></select>
     <label for="obs-dataset">观测叠加（可选）</label>
     <select id="obs-dataset"></select>
+  </section>
+
+  <section>
+    <h2>地图图层</h2>
+    <!-- M13：经纬网格叠加（预设 zoom→档位表见 app.js GRATICULE_TIERS），默认开 -->
+    <label class="inline-check"><input type="checkbox" id="graticule-toggle" checked>经纬网格（含度数标注）</label>
   </section>
 
   <section>
@@ -130,7 +136,7 @@
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
 <script>window.BASIN_CATALOG = {{ basin_catalog|safe }};</script>
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M12b 前端改动 bump m12 -->
-<script type="module" src="/static/app.js?v=m12"></script>
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M13 前端改动 bump m13 -->
+<script type="module" src="/static/app.js?v=m13"></script>
 </body>
 </html>
