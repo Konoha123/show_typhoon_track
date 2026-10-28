@@ -49,6 +49,17 @@ LOW_DENOM_CSV = (
     "LOW001,01,2026-07-01T00:00:00Z,2026-07-03T00:00:00Z,48,20.8,127.0,70,972\n"
 )
 
+# M11b：极端消散——首时次即低分母（lead 0 仅 1/4 在场），截断点 = 0h
+ALL_LOW_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa\n"
+    "ALL001,01,2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000\n"
+    "ALL001,01,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,17.9,132.2,36,999\n"
+    "ALL001,02,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.0,131.8,30,1004\n"
+    "ALL001,03,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.1,131.9,31,1003\n"
+    "ALL001,04,2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,18.2,132.1,32,1002\n"
+)
+
 _RADIUS_COLS = ",".join(
     f"radius_{speed}_knot_winds_{quad}_km"
     for speed in (34, 50, 64)
@@ -130,6 +141,11 @@ def live_url(tmp_path: Path) -> Iterator[str]:
 @pytest.fixture
 def live_url_low(tmp_path: Path) -> Iterator[str]:
     yield from _start_server(tmp_path, LOW_DENOM_CSV.encode())
+
+
+@pytest.fixture
+def live_url_all_low(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(tmp_path, ALL_LOW_CSV.encode())
 
 
 @pytest.fixture
@@ -309,7 +325,8 @@ def test_key_circles_and_labels_at_24h_steps(page, live_url: str) -> None:
 def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
     # LOW001 lead 48 低分母（1/4 在场）：mean 线截断于 48h；M5d-R11 起时效滑块域同步截断于
     # 首个低分母时次前（档位 [0,24,48] → max 指针=1 即 24h）；M5d-R12 起滑块默认 0 档，
-    # 当前时次圆=0h（以当前圆呈现而非关键圆，故关键圆仅 24）
+    # 当前时次圆=0h（以当前圆呈现而非关键圆，故关键圆仅 24）；M11b 起截断点改读后端
+    # mean_cut_lead_h（与 core.ensemble 截断规则同源），锚点与滑块行为不变
     page.goto(live_url_low)
     page.wait_for_selector("#storm option", state="attached")
     page.wait_for_selector("#stack-chart canvas")
@@ -324,6 +341,57 @@ def test_mean_track_cut_after_low_denominator(page, live_url_low: str) -> None:
     assert lead.input_value() == "0"
     assert page.locator("#lead-label").inner_text().strip() == "0 h"
     assert page.locator("[data-mean-center]").get_attribute("data-mean-center") == "0"
+
+
+def _mean_dark_cols(page, chart_selector: str, x0_frac: float, x1_frac: float) -> int:
+    """统计图表画布指定 x 区间内的均值线深色列数（#0f172a）。
+
+    像素窗口经实测校准（LOW/ALL 低分母用例，W≈403×H≈330）：y∈[30,255) 避开
+    标题/轴刻度文本（画布黑色抗锯齿字，y≥266 起为底部刻度与轴标签行）；
+    x0≥0.18 避开左侧 y 轴刻度文本（≤63px）。
+    """
+    return page.evaluate(
+        """([sel, x0f, x1f]) => {
+          const c = document.querySelector(sel + ' canvas');
+          if (!c) return -1;
+          const ctx = c.getContext('2d');
+          const W = c.width, H = c.height;
+          const img = ctx.getImageData(0, 0, W, H).data;
+          let cols = 0;
+          for (let x = Math.floor(W * x0f); x < Math.floor(W * x1f); x += 4) {
+            for (let y = 30; y < 255; y++) {
+              const i = (y * W + x) * 4;
+              if (img[i+3] > 200 && img[i] < 45 && img[i+1] < 50 && img[i+2] < 75) { cols++; break; }
+            }
+          }
+          return cols;
+        }""",
+        [chart_selector, x0_frac, x1_frac],
+    )
+
+
+def test_chart_mean_series_truncated_at_cut(page, live_url_low: str) -> None:
+    # M11b：风速图/气压图均值线止于截断点（mean_cut_lead_h=48）——lead 0-24 段（左侧）
+    # 均值深色线可见，lead 48 段（右侧）不再绘制（成员细线不受影响仍全程）
+    _open_stats(page, live_url_low)
+    for chart_id in ("#chart", "#pressure-chart"):
+        assert _mean_dark_cols(page, chart_id, 0.18, 0.58) > 0, f"{chart_id} 截断内均值线缺失"
+        assert _mean_dark_cols(page, chart_id, 0.72, 0.92) == 0, f"{chart_id} 截断后均值线仍绘制"
+
+
+def test_all_low_denominator_clamps_to_first_step(page, live_url_all_low: str) -> None:
+    # M11b 极端消散回归（沿 M5d-R12 防御口径）：首时次即低分母（mean_cut_lead_h=0）→
+    # mean 线不绘制、滑块域钳回 0 档（max=0/值=0/标签 0h）、图表均值线全程不绘制
+    page.goto(live_url_all_low)
+    page.wait_for_selector("#storm option", state="attached")
+    page.wait_for_selector("#stack-chart canvas")
+    page.wait_for_selector('path[data-member="01"]')
+    assert page.locator('path[data-mean-track]').count() == 0  # 截断内无可绘时次
+    lead = page.locator("#lead")
+    assert lead.get_attribute("max") == "0"
+    assert lead.input_value() == "0"
+    assert page.locator("#lead-label").inner_text().strip() == "0 h"
+    assert _mean_dark_cols(page, "#chart", 0.18, 0.92) == 0
 
 
 def test_circle_lead_slider_defaults_to_first_step(page, live_url: str) -> None:

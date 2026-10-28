@@ -152,6 +152,9 @@ class EnsembleStatsResponse(BaseModel):
     init: str | None
     p_values: list[int]
     count: int
+    # 截断口径（M11b）：首个低分母时次的 lead_h，null=无低分母不截断；
+    # 前端 mean 线/滑块域/强度与气压图均值线统一消费（单源 core.ensemble 截断规则）
+    mean_cut_lead_h: float | None = None
     leads: list[EnsembleLeadStats]
 
 

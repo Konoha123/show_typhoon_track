@@ -13,6 +13,7 @@ from typhoon_track.core import (
     ensemble_profile,
     filter_rows,
     impact_profile,
+    low_denominator_cut_lead,
     peak_profile,
     signed_longitude,
 )
@@ -55,7 +56,9 @@ def ensemble_stats(
 ) -> dict[str, Any]:
     """单一 (storm, init) 的逐时次集合统计载荷（口径见 core.ensemble 与 M5 口径验证记录）。
 
-    统计一律自算（已验证与官方 mean 产品一致）；storm/init 不唯一时由 core 拒绝混合。
+    统计一律自算（已验证与官方 mean 产品一致）；mean_cut_lead_h 为截断口径（M11b：
+    首个低分母时次，null=无低分母不截断），前端 mean 线/滑块域/图表均值线统一消费；
+    storm/init 不唯一时由 core 拒绝混合。
     """
     rows = filter_rows(frame, storm=storm, init=init)
     profiles = ensemble_profile(rows, p_values=p_values)
@@ -64,6 +67,7 @@ def ensemble_stats(
         "init": init,
         "p_values": list(p_values),
         "count": len(profiles),
+        "mean_cut_lead_h": low_denominator_cut_lead(profiles),
         "leads": [_lead_payload(profile) for profile in profiles],
     }
 

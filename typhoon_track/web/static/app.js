@@ -427,7 +427,14 @@ function statsByLead() {
 
 function meanSeriesByLead(field) {
   if (!statsVisible()) return null;
-  return new Map(state.stats.leads.map((l) => [l.lead_h, l[field]]));
+  // M11b：均值线止于截断点（mean_cut_lead_h 后端单源，null=无低分母不截断）；
+  // 低分母时次的均值不具集合参考性，不绘制（成员细线不受影响，仍全程）
+  const cut = state.stats.mean_cut_lead_h;
+  return new Map(
+    state.stats.leads
+      .filter((l) => cut == null || l.lead_h < cut)
+      .map((l) => [l.lead_h, l[field]]),
+  );
 }
 
 function destroyStatsCharts() {
@@ -756,10 +763,13 @@ function renderStatsLayer() {
   const centerOf = (l) => [l.mean_lat, toSignedLon(l.mean_lon)];
   const allCenters = unwrapCoords(allLeads.map(centerOf)); // 跨 180°：均值轨迹组内展开，点/线/圆共用
 
-  // mean 线截断：自首时次起连续绘制，遇到低分母时次（消散比例 > 1-30% 阈值）即停止延伸
+  // mean 线截断（M11b 起单源）：止于首个低分母时次之前——截断点取后端
+  // mean_cut_lead_h（core.ensemble 截断规则的唯一规范实现，null=无低分母不截断），
+  // 不再在前端按 low_denominator 标志自行推导（消除与 leadMaxIndex 的双头实现）
+  const cutLead = state.stats.mean_cut_lead_h;
   let cutIndex = allLeads.length;
-  for (let i = 0; i < allLeads.length; i += 1) {
-    if (allLeads[i].low_denominator) { cutIndex = i; break; }
+  if (cutLead != null) {
+    cutIndex = allLeads.filter((l) => l.lead_h < cutLead).length; // leads 升序：计数即前缀长度
   }
   const drawnLeads = allLeads.slice(0, cutIndex);
   const drawnCenters = allCenters.slice(0, cutIndex); // 展开是前缀封闭的：与 drawnLeads 逐位对应
@@ -771,8 +781,8 @@ function renderStatsLayer() {
     }).addTo(statsLayer);
     redrawables.push(track);
     track._path?.setAttribute('data-mean-track', state.storm ?? ''); // E2E/调试锚点
-    if (cutIndex < allLeads.length) {
-      track._path?.setAttribute('data-mean-cut', String(allLeads[cutIndex].lead_h));
+    if (cutLead != null && cutIndex < allLeads.length) {
+      track._path?.setAttribute('data-mean-cut', String(cutLead));
     }
   }
   drawnLeads.forEach((entry, i) => {
@@ -1275,17 +1285,17 @@ function updateStatusBar() {
 
 /* ---------- 渲染 ---------- */
 
-// M5d-R11：集合视图下滑块域截断于首个低分母时次（口径与 renderStatsLayer 的
-// mean 线 cutIndex 一致），概率圆不可落到以尾部消散成员中心绘制的时次；
-// 单成员模式/统计未就绪或失败/无低分母时次 → 不截断（滑块保持全程）
+// M5d-R11：集合视图下滑块域截断于首个低分母时次（概率圆不可落到以尾部消散成员
+// 中心绘制的时次）；M11b 起截断点改读后端 mean_cut_lead_h（core.ensemble 截断规则
+// 唯一规范实现，与 mean 线同源，null=无低分母不截断）；
+// 单成员模式/统计未就绪或失败 → 不截断（滑块保持全程）
 function leadMaxIndex() {
   const steps = state.leadSteps;
   if (!steps.length) return -1;
   let maxIdx = steps.length - 1;
   if (statsVisible()) {
-    const lowLeads = state.stats.leads.filter((l) => l.low_denominator).map((l) => l.lead_h);
-    if (lowLeads.length) {
-      const cut = Math.min(...lowLeads);
+    const cut = state.stats.mean_cut_lead_h;
+    if (cut != null) {
       while (maxIdx >= 0 && steps[maxIdx] >= cut) maxIdx -= 1;
     }
   }

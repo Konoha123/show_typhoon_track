@@ -71,6 +71,27 @@ def test_ensemble_stats_leads_and_values(client: TestClient) -> None:
     assert first["category_counts"]["TD"] == 1
     assert first["category_counts"]["DISSIPATED"] == 0
     assert first["low_denominator"] is False
+    # M11b：截断口径字段——sample 全员全程在场，无低分母时次 → null（不截断）
+    assert body["mean_cut_lead_h"] is None
+
+
+def test_ensemble_stats_mean_cut_lead_h_with_low_denominator(client: TestClient) -> None:
+    # M11b：48h 仅 1/4 在场（25% < 30%）→ 截断于首个低分母时次 48h（与 core 原语一致）
+    csv = (
+        "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+        "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa\n"
+        + "".join(
+            f"SYN202601,{m:02d},2026-07-01T00:00:00Z,2026-07-01T00:00:00Z,0,17.5,132.0,35,1000\n"
+            f"SYN202601,{m:02d},2026-07-01T00:00:00Z,2026-07-02T00:00:00Z,24,17.6,132.1,36,999\n"
+            for m in range(4)
+        )
+        + "SYN202601,00,2026-07-01T00:00:00Z,2026-07-03T00:00:00Z,48,17.7,132.2,37,998\n"
+    )
+    meta = _upload(client, "low.csv", csv.encode()).json()
+    body = _stats(client, meta["dataset_id"])
+    assert [lead["lead_h"] for lead in body["leads"]] == [0.0, 24.0, 48.0]
+    assert body["leads"][2]["low_denominator"] is True
+    assert body["mean_cut_lead_h"] == 48.0
 
 
 def test_ensemble_stats_openapi_contract(client: TestClient) -> None:
@@ -81,6 +102,8 @@ def test_ensemble_stats_openapi_contract(client: TestClient) -> None:
     lead_properties = schemas["EnsembleLeadStats"]["properties"]
     for field in ("n_present", "radius_km", "category_counts", "low_denominator"):
         assert field in lead_properties
+    # M11b：截断口径进契约
+    assert "mean_cut_lead_h" in schemas["EnsembleStatsResponse"]["properties"]
 
 
 def test_ensemble_stats_unknown_dataset_404(client: TestClient) -> None:
