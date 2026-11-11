@@ -1225,14 +1225,18 @@ function renderCpaRoseHtml(data) {
     const [x, y] = cpaPolar(idx * 45, CPA_ROSE_R_OUT + 12);
     labels += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="cpa-sector-label">${sector}</text>`;
   });
-  // 散点层：一成员一点，全线性落位（环外不画，readout 默认态常显其计数）
+  // 散点层：一成员一点，全线性落位（环外不画，readout 默认态常显其计数）；
+  // M15-R3：按 CPA 时次强度着色（复用 windColor 强度色阶，与地图轨迹点同源，
+  // 缺失/无 wind 列 → 灰 #888888，缺失保持缺失）
   let dots = '';
   let drawn = 0;
   for (const m of data.closest_members) {
     if (m.distance_km > maxR) continue;
     const [x, y] = cpaPolar(m.bearing_deg, kmToPx(m.distance_km));
     const where = m.distance_km < CPA_ORIGIN_KM ? ' · 原点区（正面穿越）' : ` · ${m.sector}`;
-    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km${where} · 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
+    const wind = m.wind_kt == null ? '—' : `${Math.round(m.wind_kt)} kt`;
+    dots += cpaDotHtml(x, y, windColor(m.wind_kt),
+      `成员 ${m.member}：${Math.round(m.distance_km)} km${where} · 时效 ${m.lead_h == null ? '—' : m.lead_h} h · 强度 ${wind}`);
     drawn += 1;
   }
   const total = data.closest_distance_bands[0]?.total_members ?? drawn;
@@ -1247,8 +1251,8 @@ function renderCpaRoseHtml(data) {
     '</svg></div>';
 }
 
-function cpaDotHtml(x, y, title) {
-  return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"><title>${escapeHtml(title)}</title></circle>`;
+function cpaDotHtml(x, y, fill, title) {
+  return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${fill}"><title>${escapeHtml(title)}</title></circle>`;
 }
 
 function cpaRoseDefaultReadout(data, total) {

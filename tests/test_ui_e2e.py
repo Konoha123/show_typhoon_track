@@ -87,14 +87,16 @@ IMPACT_CSV = (
 
 # M15：4 成员对目标 (20.0, 130.0) 的 CPA 几何确定性分布（风圈列全 0，不干扰）：
 # A 北侧 ~150 km（N/(100,200]）、B 东南 ~500 km（SE/(400,800]）、
-# C 正面 ~1.1 km（<30 km 原点区）、D 以东 ~1200 km（>800 km 环外）
+# C 正面 ~1.1 km（<30 km 原点区）、D 以东 ~1200 km（>800 km 环外）。
+# M15-R3：CPA 行风速构造跨档——A 70 kt（H1 #ffd166）、B 42 / C 36 kt（TS #66c2a5），
+# 供散点强度着色断言区分「按强度着色」与「仍统一色」
 _CPA_ZEROS = ",".join(["0"] * 12)
 CPA_ROSE_CSV = (
     "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
     "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,"
     f"{_RADIUS_COLS}\n"
     f"ROSE001,A,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,40,998,{_CPA_ZEROS}\n"
-    f"ROSE001,A,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,21.349,130.0,45,990,{_CPA_ZEROS}\n"
+    f"ROSE001,A,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,21.349,130.0,70,990,{_CPA_ZEROS}\n"
     f"ROSE001,B,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,38,1000,{_CPA_ZEROS}\n"
     f"ROSE001,B,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,16.819,133.322,42,992,{_CPA_ZEROS}\n"
     f"ROSE001,C,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,35,1002,{_CPA_ZEROS}\n"
@@ -652,6 +654,21 @@ def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
     assert abs(radii_px["A"] - (150.0 / 800) * 132) < 0.2
     assert abs(radii_px["B"] - (500.0 / 800) * 132) < 1.0  # B 构造落点 ~499.9 km
     assert radii_px["C"] < 1.0  # 1.1 km → ~0.2 px，自然圆心簇
+    # M15-R3 强度着色：dot 内联 fill 按 CPA 时次风速取 windColor 色阶（H1 64–82 kt
+    # #ffd166 / TS 34–63 kt #66c2a5）——A CPA 行 70 kt、B 42 / C 36 kt，跨档构造
+    # 防「仍统一色」的假绿；几何（cx/cy）与着色（fill）互不干扰双重锁定
+    fills = page.evaluate(
+        """
+        () => Object.fromEntries([...document.querySelectorAll('svg.cpa-rose circle.cpa-dot')]
+          .map((c) => {
+            const member = c.querySelector('title').textContent.match(/成员 (\\w+)/)?.[1];
+            return [member, c.getAttribute('fill')];
+          }))
+        """
+    )
+    assert fills["A"] == "#ffd166"
+    assert fills["B"] == "#66c2a5"
+    assert fills["C"] == "#66c2a5"
     # M15-R1 readout：默认态常显 成员/原点/环外（含比例）
     readout = page.locator("[data-cpa-readout]")
     assert readout.inner_text() == "成员 4 · 原点 1 (25.0%) · 环外 1 (25.0%)"

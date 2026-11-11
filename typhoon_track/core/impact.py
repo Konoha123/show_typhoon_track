@@ -31,7 +31,10 @@
 - CPA 方位分箱（M15）：地点→CPA 位置方位角按 compass_8 分 8 扇区（22.5° 奇数倍
   分界归顺时针下一方位）；格为 8 扇区 × 4 环带的增量语义（(prev, radius]），
   原点区（distance < CPA_ORIGIN_RADIUS_KM，正面穿越）不入扇区格、环外
-  （> 最大档）不入任何格，两者单独计数；明细按 (distance, member) 升序。
+  （> 最大档）不入任何格，两者单独计数；明细按 (distance, member) 升序；
+- CPA 时次风速（M15-R3）：明细携带 wind_kt = CPA 时次（即被选中那行）的 wind
+  值，供前端按强度色阶着色；该时次缺失或帧缺 wind 列时为 None，不参与任何
+  命中/分档判定（纯展示字段）。
 """
 
 from __future__ import annotations
@@ -99,7 +102,11 @@ class ClosestApproach:
 
 @dataclass(frozen=True)
 class MemberClosest:
-    """单成员 CPA（M15）：存在期全时次距目标的最小值（并列取最早时效）。"""
+    """单成员 CPA（M15）：存在期全时次距目标的最小值（并列取最早时效）。
+
+    wind_kt（M15-R3）：CPA 时次的风速（1 分钟平均，按数据提供口径）；该时次
+    风速缺失或帧缺 wind 列时为 None（缺失保持缺失，不臆造 0）。
+    """
 
     member: str
     distance_km: float
@@ -107,6 +114,7 @@ class MemberClosest:
     valid: pd.Timestamp | None
     bearing_deg: float  # 地点→CPA 位置方位角（正北 0°、顺时针 0–360°）
     sector: str  # 8 方位码（compass_8；原点区成员按方位角照常计算，仅分箱归原点格）
+    wind_kt: float | None = None
 
 
 @dataclass(frozen=True)
@@ -340,6 +348,7 @@ def _member_cpa_stats(
                 valid=_timestamp_or_none(record.get("valid")),
                 bearing_deg=bearing,
                 sector=compass_8(bearing),
+                wind_kt=_to_float(record.get("wind")),
             )
         )
     members.sort(key=lambda m: (m.distance_km, m.member))

@@ -175,7 +175,7 @@ def test_impact_stats_openapi_contract(client: TestClient) -> None:
     ):
         assert field in impact_properties
     member_properties = schemas["MemberClosestApproach"]["properties"]
-    for field in ("member", "distance_km", "lead_h", "valid", "bearing_deg", "sector"):
+    for field in ("member", "distance_km", "lead_h", "valid", "bearing_deg", "sector", "wind_kt"):
         assert field in member_properties
     core_properties = schemas["CoreWindStats"]["properties"]
     for field in ("label", "hit_members", "total_members", "fraction"):
@@ -191,9 +191,14 @@ def test_impact_stats_member_cpa_fields_contract(client: TestClient) -> None:
     distances = [m["distance_km"] for m in members]
     assert distances == sorted(distances)  # (distance, member) 升序
     first = members[0]
-    assert set(first) == {"member", "distance_km", "lead_h", "valid", "bearing_deg", "sector"}
+    assert set(first) == {"member", "distance_km", "lead_h", "valid", "bearing_deg", "sector", "wind_kt"}
     assert first["valid"].startswith("2026-07-")  # ISO 8601
     assert first["sector"] in ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    # M15-R3：CPA 时次风速进明细（着色用）——目标 (17.8,132.4) 下最近成员 02 的
+    # CPA 行 = lead 24 (18.0,132.0)，wind 31 kt；缺失场景见 core 单测
+    assert first["member"] == "02"
+    assert first["lead_h"] == 24.0
+    assert first["wind_kt"] == pytest.approx(31.0)
     bands = body["closest_distance_bands"]
     assert [b["radius_km"] for b in bands] == [100, 200, 400, 800]
     assert all(b["total_members"] == 2 for b in bands)

@@ -245,6 +245,7 @@ class MemberClosestApproach(BaseModel):
     valid: str | None = None  # ISO 8601（UTC）
     bearing_deg: float  # 地点→CPA 位置方位角（正北 0°、顺时针 0–360°）
     sector: str  # 8 方位码（N/NE/E/SE/S/SW/W/NW；原点区成员仅作参考标注）
+    wind_kt: float | None = None  # CPA 时次风速（M15-R3，着色用；缺失为 null）
 
 
 class ClosestDistanceBand(BaseModel):

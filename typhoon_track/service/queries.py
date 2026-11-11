@@ -134,6 +134,7 @@ def impact_stats(
                     "valid": m.valid,
                     "bearing_deg": m.bearing_deg,
                     "sector": m.sector,
+                    "wind_kt": m.wind_kt,
                 }
             )
             for m in profile.members_closest

@@ -436,6 +436,41 @@ def test_member_cpa_full_lead_untruncated_vs_mean_closest_truncated() -> None:
     assert sum(cells.values()) + profile.closest_origin_members == 4  # 守恒：格+原点=明细数
 
 
+def test_member_cpa_wind_taken_from_cpa_row() -> None:
+    # M15-R3：wind_kt 取被选中 CPA 行（距离最小行）的风速——非成员峰值风速行、
+    # 非末行、非任何其它时次。目标 (10,130)：CPA 行 = lead 24（10.5, 130.0,
+    # 45 kt）；lead 0 行风速 80（更高但更远）、lead 48 行 20（更远）
+    frame = make_frame(
+        [
+            {"member": "0", "lead_h": 0.0, "lat": 12.0, "lon": 130.0, "wind": 80.0},
+            {"member": "0", "lead_h": 24.0, "lat": 10.5, "lon": 130.0, "wind": 45.0},
+            {"member": "0", "lead_h": 48.0, "lat": 13.0, "lon": 131.0, "wind": 20.0},
+        ]
+    )
+    (entry,) = impact_profile(frame, lat=10.0, lon=130.0).members_closest
+    assert entry.lead_h == 24.0  # CPA 行 = 距离最小行
+    assert entry.distance_km == pytest.approx(haversine_km(10.0, 130.0, 10.5, 130.0))
+    assert entry.wind_kt == pytest.approx(45.0)  # CPA 行风速，不串行
+
+
+def test_member_cpa_wind_missing_stays_none() -> None:
+    # M15-R3：CPA 行风速缺失 → None；帧整列无 wind 同样 None（缺失保持缺失，
+    # 不臆造 0、不借用它行风速——lead 24 行 40 kt 不得串入 CPA 行）
+    frame = make_frame(
+        [
+            {"member": "0", "lead_h": 0.0, "lat": 10.0, "lon": 130.0, "wind": None},
+            {"member": "0", "lead_h": 24.0, "lat": 12.0, "lon": 131.0, "wind": 40.0},
+        ]
+    )
+    (entry,) = impact_profile(frame, lat=10.0, lon=130.0).members_closest
+    assert entry.distance_km == pytest.approx(0.0, abs=1e-6)  # CPA = lead 0 行
+    assert entry.wind_kt is None
+    (no_wind_entry,) = impact_profile(
+        frame.drop(columns=["wind"]), lat=10.0, lon=130.0
+    ).members_closest
+    assert no_wind_entry.wind_kt is None  # 帧缺 wind 列同样 None
+
+
 def test_closest_bands_cumulative_with_bit_exact_equality() -> None:
     # 成员 A 与目标重合（d=0.0，位级精确）与注入档位 0 比较：累积 ≤ 含等号
     # （若为严格 < 则 A 不命中）；成员 B ~1.1 km 不入 0 档
