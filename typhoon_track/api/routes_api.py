@@ -19,12 +19,15 @@ from .schemas import (
     CLOSEST_NOTE_TEXTS,
     CORE_WIND_LABEL,
     IMPACT_THRESHOLD_LABELS,
+    ClosestBearingCell,
+    ClosestDistanceBand,
     CoreWindStats,
     DatasetListResponse,
     DatasetMeta,
     EnsembleStatsResponse,
     ImpactStatsResponse,
     ImpactThresholdStats,
+    MemberClosestApproach,
     PeakStatsResponse,
     Place,
     PlacesResponse,
@@ -201,4 +204,16 @@ def register(app: FastAPI) -> None:
             closest=payload["closest"],
             # M11a：core 原因码 -> 中文文案（closest 非 None 时为 None）
             closest_note=CLOSEST_NOTE_TEXTS.get(reason) if reason else None,
+            # M15 成员级 CPA：明细 + 分档 + 扇区格 + 原点/环外计数（payload 固定含键）
+            closest_members=[
+                MemberClosestApproach(**m) for m in payload["closest_members"]
+            ],
+            closest_distance_bands=[
+                ClosestDistanceBand(**b) for b in payload["closest_distance_bands"]
+            ],
+            closest_bearing_cells=[
+                ClosestBearingCell(**c) for c in payload["closest_bearing_cells"]
+            ],
+            closest_origin_members=payload["closest_origin_members"],
+            closest_beyond_members=payload["closest_beyond_members"],
         )

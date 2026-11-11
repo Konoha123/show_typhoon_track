@@ -3,6 +3,8 @@
 M5：注入集合统计配置（强度分级/堆叠层级/p 档位/低分母阈值），单一事实来源为
 core.ensemble 常量，前端不再硬编码（口径见 docs/M5口径验证记录_20261016.md）。
 M9：注入洋区码表（地点侧 8 码复选框 + 气旋侧 SH 粗码提示标签），单源 core.basin。
+M15：注入 CPA 距离分档档位与原点区阈值（单源 core.impact 常量）——统计口径与
+地图参考圆半径共用同一注入源，前端不再硬编码 100/200/400/800。
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ from fastapi.templating import Jinja2Templates
 
 from typhoon_track.core import (
     CATEGORY_STACK_BOTTOM_UP,
+    CLOSEST_DISTANCE_RADII,
+    CPA_ORIGIN_RADIUS_KM,
     DEFAULT_P_VALUES,
     DISSIPATED_COLOR,
     DISSIPATED_KEY,
@@ -31,7 +35,7 @@ from typhoon_track.core.basin import BASIN_NAMES, BASIN_ORDER
 
 
 def stats_config_json() -> str:
-    """由 core.ensemble 常量生成注入页面的统计配置（TD 下限 -inf 以 null 传输）。"""
+    """由 core 常量生成注入页面的统计配置（TD 下限 -inf 以 null 传输）。"""
     payload = {
         "categories": [
             {
@@ -47,6 +51,9 @@ def stats_config_json() -> str:
         "unknown": {"key": UNKNOWN_KEY, "label": "风速缺失", "color": UNKNOWN_COLOR},
         "pValues": list(DEFAULT_P_VALUES),
         "lowDenominatorFraction": LOW_DENOMINATOR_FRACTION,
+        # M15：CPA 距离分档档位（= 地图参考圆半径）与原点区阈值（正面穿越）
+        "closestRadii": list(CLOSEST_DISTANCE_RADII),
+        "closestOriginKm": CPA_ORIGIN_RADIUS_KM,
     }
     return json.dumps(payload, ensure_ascii=False)
 

@@ -124,6 +124,39 @@ def impact_stats(
         "closest": closest,
         # M11a：closest 为 None 时的不可用原因（core 原因码透传，api 层映射文案）
         "closest_reason": profile.closest_reason,
+        # M15 成员级 CPA：明细（(distance, member) 升序）+ 距离分档 + 方位扇区格
+        "closest_members": [
+            _jsonable_record(
+                {
+                    "member": m.member,
+                    "distance_km": m.distance_km,
+                    "lead_h": m.lead_h,
+                    "valid": m.valid,
+                    "bearing_deg": m.bearing_deg,
+                    "sector": m.sector,
+                }
+            )
+            for m in profile.members_closest
+        ],
+        "closest_distance_bands": [
+            {
+                "radius_km": band.radius_km,
+                "hit_members": band.hit_members,
+                "total_members": band.total_members,
+                "fraction": band.fraction,
+            }
+            for band in profile.closest_bands
+        ],
+        "closest_bearing_cells": [
+            {
+                "sector": cell.sector,
+                "radius_km": cell.radius_km,
+                "hit_members": cell.hit_members,
+            }
+            for cell in profile.closest_cells
+        ],
+        "closest_origin_members": profile.closest_origin_members,
+        "closest_beyond_members": profile.closest_beyond_members,
     }
 
 

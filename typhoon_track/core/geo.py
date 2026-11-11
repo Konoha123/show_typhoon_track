@@ -14,6 +14,9 @@ _COMPASS_16: tuple[str, ...] = (
     "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
 )
 
+# 8 方位扇区固定序（N 起顺时针）：CPA 方位分箱的响应契约序（M15）
+COMPASS_8_SECTORS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
 
 def signed_longitude(lon: pd.Series) -> pd.Series:
     """0–360° 经度约定转换为 −180–180°；已为负值时幂等；缺失保持缺失。
@@ -54,6 +57,16 @@ def compass_16(bearing_deg: float) -> str:
     """
     index = int(((bearing_deg % 360.0) + 11.25) // 22.5) % 16
     return _COMPASS_16[index]
+
+
+def compass_8(bearing_deg: float) -> str:
+    """0–360° 方位角 → 8 方位罗盘文字（N/NE/E/SE/S/SW/W/NW；M15）。
+
+    22.5° 奇数倍分界归入顺时针方向的下一方位（如 22.5° → NE、337.5° → N），
+    与 compass_16 / 风圈象限同惯例；扇区固定序见 COMPASS_8_SECTORS。
+    """
+    index = int(((bearing_deg % 360.0) + 22.5) // 45.0) % 8
+    return COMPASS_8_SECTORS[index]
 
 
 def spherical_mean(lat: pd.Series, lon: pd.Series) -> tuple[float, float]:

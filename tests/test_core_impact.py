@@ -1,9 +1,10 @@
-"""core.impact 与 core.geo 方位扩展：象限判定/三级影响概率/最近接近/核心强风区（M7d）测试。
+"""core.impact 与 core.geo 方位扩展：象限判定/三级影响概率/最近接近/核心强风区（M7d）/成员级 CPA（M15）测试。
 
 含 WNV3 真实数据抽核（文件缺失自动跳过）：
 - 远点三级概率全 0；
 - 按成员实际风圈构造的命中点必使对应阈值分子 ≥1（独立于实现的落点公式）；
-- 目标点取 lead 0 自算均值位置时最近接近时效为 0 且距离 ≈ 0。
+- 目标点取 lead 0 自算均值位置时最近接近时效为 0 且距离 ≈ 0；
+- 成员级 CPA 独立复算（pandas 逐成员最小距离/分档/扇区计数对照，M15）。
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ import pandas as pd
 import pytest
 
 from typhoon_track.core import (
+    COMPASS_8_SECTORS,
     WIND_THRESHOLDS,
+    compass_8,
     compass_16,
     ensemble_profile,
     filter_rows,
@@ -340,6 +343,180 @@ def test_impact_profile_closest_single_member_untruncated() -> None:
     assert closest.distance_km == pytest.approx(0.0, abs=1e-6)
 
 
+# ---------- geo：compass_8（M15） ----------
+
+
+def test_compass_8_sectors_and_boundaries() -> None:
+    assert compass_8(0.0) == "N"
+    assert compass_8(11.24) == "N"
+    assert compass_8(22.5) == "NE"  # 分界归顺时针下一方位
+    assert compass_8(45.0) == "NE"
+    assert compass_8(67.5) == "E"
+    assert compass_8(90.0) == "E"
+    assert compass_8(112.5) == "SE"
+    assert compass_8(157.5) == "S"
+    assert compass_8(202.5) == "SW"
+    assert compass_8(247.5) == "W"
+    assert compass_8(292.5) == "NW"
+    assert compass_8(337.5) == "N"
+    assert compass_8(359.9) == "N"
+    assert compass_8(360.0) == "N"
+
+
+def test_compass_8_sector_order_constant() -> None:
+    # 响应契约序：N 起顺时针固定 8 码（closest_bearing_cells 按此序展开）
+    assert COMPASS_8_SECTORS == ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+# ---------- 成员级 CPA（M15：全程时次、一成员一点、并列取最早时效） ----------
+
+
+def test_member_cpa_minimum_distance_and_earliest_lead_tie() -> None:
+    # 成员 0 两时次对目标 (10,131) 镜像等距（130/132 经度）→ 并列取最早时效；
+    # 更早行在文件序靠后也须胜出（排序键而非文件序）
+    frame = make_frame(
+        [
+            {"member": "0", "lead_h": 24.0, "lat": 10.0, "lon": 132.0},
+            {"member": "0", "lead_h": 0.0, "lat": 10.0, "lon": 130.0},
+        ]
+    )
+    (entry,) = impact_profile(frame, lat=10.0, lon=131.0).members_closest
+    assert entry.member == "0"
+    assert entry.lead_h == 0.0
+    assert entry.valid == pd.Timestamp("2026-10-15T18:00:00", tz="UTC")
+    assert entry.distance_km == pytest.approx(haversine_km(10.0, 131.0, 10.0, 130.0))
+    assert entry.bearing_deg == pytest.approx(270.0, abs=0.2)  # CPA 位置在目标以西
+    assert entry.sector == "W"
+
+
+def test_member_cpa_missing_lead_row_eligible() -> None:
+    # lead 缺失的时次仍可参选（更近即胜，缺失保持缺失不臆造时效）
+    frame = make_frame(
+        [
+            {"member": "0", "lead_h": None, "lat": 10.0, "lon": 130.5},
+            {"member": "0", "lead_h": 24.0, "lat": 15.0, "lon": 135.0},
+        ]
+    )
+    (entry,) = impact_profile(frame, lat=10.0, lon=130.0).members_closest
+    assert entry.lead_h is None
+    assert entry.distance_km == pytest.approx(haversine_km(10.0, 130.0, 10.0, 130.5))
+
+
+def test_member_cpa_tie_prefers_row_with_lead_over_missing() -> None:
+    # 等距并列：有实效的时次排在无时效时次之前（无时效视为最晚）
+    frame = make_frame(
+        [
+            {"member": "0", "lead_h": None, "lat": 10.0, "lon": 130.0},
+            {"member": "0", "lead_h": 24.0, "lat": 10.0, "lon": 132.0},
+        ]
+    )
+    (entry,) = impact_profile(frame, lat=10.0, lon=131.0).members_closest
+    assert entry.lead_h == 24.0
+
+
+def test_member_cpa_full_lead_untruncated_vs_mean_closest_truncated() -> None:
+    # M11a 低分母尾段复用：mean 最近接近截断于 48h（lead 0/~555 km），而成员 0 的
+    # CPA 走全程时次口径——尾段 72h 贴目标（0 km）仍须计入（两口径并存不混淆）
+    rows = [{"member": str(m), "lead_h": lead} for m in range(4) for lead in (0.0, 24.0, 48.0)]
+    rows += [{"member": "0", "lead_h": lead, "lat": 15.0} for lead in (72.0, 96.0, 120.0)]
+    profile = impact_profile(make_frame(rows), lat=15.0, lon=130.0)
+    assert profile.closest is not None
+    assert profile.closest.lead_h == 0.0  # mean 截断口径不变（回归保护）
+    assert profile.closest.distance_km > 500.0
+    by_member = {m.member: m for m in profile.members_closest}
+    assert by_member["0"].distance_km == pytest.approx(0.0, abs=1e-6)  # 全程：尾段命中
+    assert by_member["0"].lead_h == 72.0
+    assert by_member["1"].distance_km == pytest.approx(haversine_km(15.0, 130.0, 10.0, 130.0))
+    assert by_member["1"].sector == "S"  # CPA 位置在目标以南
+    assert [b.hit_members for b in profile.closest_bands] == [1, 1, 1, 4]
+    assert profile.closest_origin_members == 1  # 成员 0 正面穿越（< 30 km）
+    assert profile.closest_beyond_members == 0
+    cells = {(c.sector, c.radius_km): c.hit_members for c in profile.closest_cells}
+    assert cells[("S", 800)] == 3  # 成员 1/2/3 ~555 km 落 (400,800] 环带
+    assert sum(cells.values()) + profile.closest_origin_members == 4  # 守恒：格+原点=明细数
+
+
+def test_closest_bands_cumulative_with_bit_exact_equality() -> None:
+    # 成员 A 与目标重合（d=0.0，位级精确）与注入档位 0 比较：累积 ≤ 含等号
+    # （若为严格 < 则 A 不命中）；成员 B ~1.1 km 不入 0 档
+    frame = make_frame(
+        [
+            {"member": "A", "lat": 10.0, "lon": 130.0},
+            {"member": "B", "lat": 10.01, "lon": 130.0},
+        ]
+    )
+    profile = impact_profile(frame, lat=10.0, lon=130.0, radii=(0, 100), origin_radius_km=1.0)
+    bands = {b.radius_km: b for b in profile.closest_bands}
+    assert bands[0].hit_members == 1  # 仅 d=0（≤ 0 含等号）
+    assert bands[0].total_members == 2
+    assert bands[0].fraction == pytest.approx(0.5)
+    assert bands[100].hit_members == 2
+
+
+def test_closest_bands_monotonic_cells_order_and_sectors() -> None:
+    # 三成员 150/300/500 km（扇区内部方位角，避开分界浮点）→ 累积单调 + 固定格序
+    spec = {"A": (5.0, 150.0), "B": (50.0, 300.0), "C": (95.0, 500.0)}
+    rows = []
+    for member, (bearing, dist) in spec.items():
+        point_lat, point_lon = destination_point(10.0, 130.0, bearing, dist)
+        rows.append({"member": member, "lat": point_lat, "lon": point_lon})
+    profile = impact_profile(make_frame(rows), lat=10.0, lon=130.0)
+    assert [b.hit_members for b in profile.closest_bands] == [0, 1, 2, 3]
+    assert {m.member: m.sector for m in profile.members_closest} == {"A": "N", "B": "NE", "C": "E"}
+    assert [m.member for m in profile.members_closest] == ["A", "B", "C"]  # 距离升序
+    assert [(c.sector, c.radius_km) for c in profile.closest_cells] == [
+        (sector, radius) for sector in COMPASS_8_SECTORS for radius in (100, 200, 400, 800)
+    ]
+    cells = {(c.sector, c.radius_km): c.hit_members for c in profile.closest_cells}
+    assert cells[("N", 100)] == 0
+    assert cells[("N", 200)] == 1  # A 150 km 落 (100,200] 环带
+    assert cells[("NE", 400)] == 1  # B 300 km
+    assert cells[("E", 800)] == 1  # C 500 km
+    assert sum(cells.values()) == 3
+    assert profile.closest_origin_members == 0
+    assert profile.closest_beyond_members == 0
+
+
+def test_closest_origin_zone_and_beyond_members() -> None:
+    # 正面穿越（<30 km）入原点区不入扇区格；环外（>800 km）不入任何档/格但留明细
+    direct_lat, direct_lon = destination_point(10.0, 130.0, 300.0, 5.0)
+    far_lat, far_lon = destination_point(10.0, 130.0, 120.0, 1200.0)
+    frame = make_frame(
+        [
+            {"member": "D", "lat": direct_lat, "lon": direct_lon},
+            {"member": "E", "lat": 10.0, "lon": 130.0},  # 与目标重合：原点区
+            {"member": "F", "lat": far_lat, "lon": far_lon},
+        ]
+    )
+    profile = impact_profile(frame, lat=10.0, lon=130.0)
+    assert profile.closest_origin_members == 2
+    assert profile.closest_beyond_members == 1
+    assert [b.hit_members for b in profile.closest_bands] == [2, 2, 2, 2]  # D/E ≤100；F 环外不入档
+    assert sum(c.hit_members for c in profile.closest_cells) == 0
+    by_member = {m.member: m for m in profile.members_closest}
+    assert by_member["E"].distance_km == pytest.approx(0.0, abs=1e-9)
+    assert by_member["D"].sector == "NW"  # 方位 300°（原点区仍按方位角计算 sector）
+    assert by_member["F"].distance_km == pytest.approx(1200.0, rel=1e-3)  # 环外仍在明细
+    assert by_member["F"].sector == "SE"
+
+
+def test_member_cpa_positionless_member_stays_in_denominator() -> None:
+    # 全程无有效坐标的成员：留分母、永不命中、不出现在明细（与三级风速口径一致）
+    frame = make_frame(
+        [
+            {"member": "A", "lat": 10.05, "lon": 130.05},  # ~7.8 km → 原点区
+            {"member": "B", "lat": None, "lon": None},
+        ]
+    )
+    profile = impact_profile(frame, lat=10.0, lon=130.0)
+    assert [m.member for m in profile.members_closest] == ["A"]
+    bands = {b.radius_km: b for b in profile.closest_bands}
+    assert bands[100].hit_members == 1
+    assert bands[100].total_members == 2
+    assert bands[100].fraction == pytest.approx(0.5)
+    assert profile.closest_origin_members == 1
+
+
 # ---------- 真实数据抽核（WNV3 配对文件，缺失自动跳过） ----------
 
 
@@ -392,3 +569,85 @@ def test_real_closest_at_lead0_mean_center(real_storm_frame) -> None:
     assert closest is not None
     assert closest.lead_h == lead0.lead_h
     assert closest.distance_km == pytest.approx(0.0, abs=1e-6)
+
+
+def _independent_haversine_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    """测试内独立球面距离实现（不复用 core.geo，规避同源盲区）。"""
+    phi_a, phi_b = math.radians(lat_a), math.radians(lat_b)
+    d_phi = math.radians(lat_b - lat_a)
+    d_lam = math.radians(lon_b - lon_a)
+    h = (
+        math.sin(d_phi / 2.0) ** 2
+        + math.cos(phi_a) * math.cos(phi_b) * math.sin(d_lam / 2.0) ** 2
+    )
+    return 2.0 * EARTH_RADIUS_KM * math.asin(math.sqrt(min(h, 1.0)))
+
+
+def _independent_bearing_deg(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    """测试内独立初始方位角实现（正北 0°、顺时针 0–360°）。"""
+    phi_a, phi_b = math.radians(lat_a), math.radians(lat_b)
+    d_lam = math.radians(lon_b - lon_a)
+    y = math.sin(d_lam) * math.cos(phi_b)
+    x = math.cos(phi_a) * math.sin(phi_b) - math.sin(phi_a) * math.cos(phi_b) * math.cos(d_lam)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+_INDEPENDENT_SECTORS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def _independent_compass_8(bearing_deg: float) -> str:
+    return _INDEPENDENT_SECTORS[int(((bearing_deg % 360.0) + 22.5) // 45.0) % 8]
+
+
+def test_real_member_cpa_independent_recomputation(real_storm_frame) -> None:
+    # M15 独立复算：lead 0 均值位置东南 350 km 取确定性目标点，pandas 逐成员最小
+    # 距离/方位 → 分档/扇区格/原点/环外计数全部独立重算，与 impact_profile 对照
+    lead0 = ensemble_profile(real_storm_frame)[0]
+    assert lead0.mean_lat is not None and lead0.mean_lon is not None
+    target_lat, target_lon = destination_point(lead0.mean_lat, lead0.mean_lon, 135.0, 350.0)
+    profile = impact_profile(real_storm_frame, lat=target_lat, lon=target_lon)
+
+    best: dict[str, tuple[float, float, float, float]] = {}  # member -> (distance, lead, lat, lon)
+    for record in real_storm_frame.to_dict("records"):
+        lat_v, lon_v = record["lat"], record["lon"]
+        if pd.isna(lat_v) or pd.isna(lon_v):
+            continue
+        distance = _independent_haversine_km(target_lat, target_lon, float(lat_v), float(lon_v))
+        member = str(record["member"])
+        current = best.get(member)
+        if current is None or distance < current[0]:
+            best[member] = (distance, float(record["lead_h"]), float(lat_v), float(lon_v))
+
+    assert len(profile.members_closest) == len(best) == real_storm_frame["member"].nunique()
+    for entry in profile.members_closest:
+        independent_distance, _, _, _ = best[entry.member]
+        assert entry.distance_km == pytest.approx(independent_distance, abs=1e-6), entry.member
+
+    radii = (100, 200, 400, 800)
+    independent_bands = [sum(1 for d, *_ in best.values() if d <= r) for r in radii]
+    assert [b.hit_members for b in profile.closest_bands] == independent_bands
+    assert all(b.total_members == len(best) for b in profile.closest_bands)
+
+    # 扇区格独立重算：CPA 时次坐标 → 测试内方位/扇区公式 → 环带增量计数
+    cells: dict[tuple[str, int], int] = {}
+    for _member, (distance, _, cpa_lat, cpa_lon) in best.items():
+        sector = _independent_compass_8(
+            _independent_bearing_deg(target_lat, target_lon, cpa_lat, cpa_lon)
+        )
+        if distance < 30.0:
+            continue  # 原点区不入格
+        for prev, radius in zip((0, 100, 200, 400), radii, strict=True):
+            if prev < distance <= radius:
+                cells[(sector, radius)] = cells.get((sector, radius), 0) + 1
+                break
+    assert {
+        (c.sector, c.radius_km): c.hit_members for c in profile.closest_cells if c.hit_members
+    } == cells
+    assert (
+        sum(cells.values())
+        + profile.closest_origin_members
+        + profile.closest_beyond_members
+        == len(best)
+    )
+    assert profile.closest_origin_members == sum(1 for d, *_ in best.values() if d < 30.0)
+    assert profile.closest_beyond_members == sum(1 for d, *_ in best.values() if d > 800)

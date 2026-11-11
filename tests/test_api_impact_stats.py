@@ -149,7 +149,15 @@ def test_impact_stats_closest_note_no_mean_position(client: TestClient) -> None:
 def test_impact_stats_openapi_contract(client: TestClient) -> None:
     document = client.get("/openapi.json").json()
     schemas = document["components"]["schemas"]
-    for name in ("ImpactThresholdStats", "CoreWindStats", "ClosestApproach", "ImpactStatsResponse"):
+    for name in (
+        "ImpactThresholdStats",
+        "CoreWindStats",
+        "ClosestApproach",
+        "MemberClosestApproach",
+        "ClosestDistanceBand",
+        "ClosestBearingCell",
+        "ImpactStatsResponse",
+    ):
         assert name in schemas, f"OpenAPI 缺少契约模型: {name}"
     closest_properties = schemas["ClosestApproach"]["properties"]
     for field in ("distance_km", "bearing_deg", "compass", "mean_wind", "mean_pressure"):
@@ -157,9 +165,54 @@ def test_impact_stats_openapi_contract(client: TestClient) -> None:
     # M11a：closest_note 进契约（closest 为 null 时的原因文案）
     impact_properties = schemas["ImpactStatsResponse"]["properties"]
     assert "closest_note" in impact_properties
+    # M15：成员级 CPA 明细/分档/扇区格/原点/环外进契约
+    for field in (
+        "closest_members",
+        "closest_distance_bands",
+        "closest_bearing_cells",
+        "closest_origin_members",
+        "closest_beyond_members",
+    ):
+        assert field in impact_properties
+    member_properties = schemas["MemberClosestApproach"]["properties"]
+    for field in ("member", "distance_km", "lead_h", "valid", "bearing_deg", "sector"):
+        assert field in member_properties
     core_properties = schemas["CoreWindStats"]["properties"]
     for field in ("label", "hit_members", "total_members", "fraction"):
         assert field in core_properties
+
+
+def test_impact_stats_member_cpa_fields_contract(client: TestClient) -> None:
+    # M15：明细/分档/扇区格字段契约（固定格序、明细升序、守恒）
+    meta = _upload(client, "impact.csv", IMPACT_CSV.encode()).json()
+    body = _impact(client, meta["dataset_id"], lat=17.8, lon=132.4).json()
+    members = body["closest_members"]
+    assert len(members) == 2
+    distances = [m["distance_km"] for m in members]
+    assert distances == sorted(distances)  # (distance, member) 升序
+    first = members[0]
+    assert set(first) == {"member", "distance_km", "lead_h", "valid", "bearing_deg", "sector"}
+    assert first["valid"].startswith("2026-07-")  # ISO 8601
+    assert first["sector"] in ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    bands = body["closest_distance_bands"]
+    assert [b["radius_km"] for b in bands] == [100, 200, 400, 800]
+    assert all(b["total_members"] == 2 for b in bands)
+    hits = [b["hit_members"] for b in bands]
+    assert hits == sorted(hits)  # 累积口径单调不减
+    cells = body["closest_bearing_cells"]
+    assert len(cells) == 32
+    assert [(c["sector"], c["radius_km"]) for c in cells] == [
+        (sector, radius)
+        for sector in ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        for radius in (100, 200, 400, 800)
+    ]
+    # 守恒：扇区格 + 原点 + 环外 = 有明细成员数（坐标全缺成员留分母无明细）
+    assert (
+        sum(c["hit_members"] for c in cells)
+        + body["closest_origin_members"]
+        + body["closest_beyond_members"]
+        == len(members)
+    )
 
 
 def test_impact_stats_unknown_dataset_404(client: TestClient) -> None:

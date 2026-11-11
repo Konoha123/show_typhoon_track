@@ -236,10 +236,44 @@ class ClosestApproach(BaseModel):
     mean_lon: float
 
 
+class MemberClosestApproach(BaseModel):
+    """单成员 CPA 明细（M15：存在期全时次最小距离；并列取最早时效）。"""
+
+    member: str
+    distance_km: float
+    lead_h: float | None = None  # 帧缺 lead 列时为 null
+    valid: str | None = None  # ISO 8601（UTC）
+    bearing_deg: float  # 地点→CPA 位置方位角（正北 0°、顺时针 0–360°）
+    sector: str  # 8 方位码（N/NE/E/SE/S/SW/W/NW；原点区成员仅作参考标注）
+
+
+class ClosestDistanceBand(BaseModel):
+    """CPA 距离分档累积统计（中心最近距离 ≤ radius_km，含等号；M15）。"""
+
+    radius_km: int
+    hit_members: int
+    total_members: int
+    fraction: float | None  # total_members 为 0 时为 null
+
+
+class ClosestBearingCell(BaseModel):
+    """CPA 方位扇区 × 环带格计数（M15；环带增量语义 (prev, radius_km]）。
+
+    原点区（< closestOriginKm，正面穿越）与环外（> 最大档）不入格，另见
+    ImpactStatsResponse.closest_origin_members / closest_beyond_members。
+    """
+
+    sector: str  # 8 方位码（N 起顺时针固定序）
+    radius_km: int
+    hit_members: int
+
+
 class ImpactStatsResponse(BaseModel):
     """影响统计响应；thresholds 固定 34/50/64 kt 三级 + core_wind 核心强风区（M7d），
     closest 无有效位置时为 null，并以 closest_note 说明原因（M11a：全程无均值位置 /
-    截断内无有效时次，文案见 CLOSEST_NOTE_TEXTS）。"""
+    截断内无有效时次，文案见 CLOSEST_NOTE_TEXTS）；
+    M15 成员级 CPA：closest_members 明细 + closest_distance_bands 距离分档 +
+    closest_bearing_cells 方位扇区格（8 方位 × 4 环带固定序）+ 原点/环外计数。"""
 
     dataset_id: str
     kind: Kind
@@ -251,3 +285,8 @@ class ImpactStatsResponse(BaseModel):
     core_wind: CoreWindStats
     closest: ClosestApproach | None
     closest_note: str | None = None  # closest 为 None 时的原因文案；closest 非 None 时为 null
+    closest_members: list[MemberClosestApproach] = []
+    closest_distance_bands: list[ClosestDistanceBand] = []
+    closest_bearing_cells: list[ClosestBearingCell] = []
+    closest_origin_members: int = 0
+    closest_beyond_members: int = 0

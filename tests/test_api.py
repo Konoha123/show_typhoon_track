@@ -48,6 +48,9 @@ def test_index_page_renders(client: TestClient) -> None:
     # M5d：统计配置注入（分级/堆叠层级来自 core.ensemble 单源）+ p 控件 + 统计图表卡
     assert "window.STATS_CONFIG" in response.text
     assert "stackBottomUp" in response.text
+    # M15：CPA 距离分档档位与原点区阈值注入（单源 core.impact，参考圆绘制同源）
+    assert '"closestRadii": [100, 200, 400, 800]' in response.text
+    assert '"closestOriginKm": 30.0' in response.text
     assert 'id="p-select"' in response.text
     assert 'id="p-apply"' in response.text
     for card in ("pressure-wrap", "stack-wrap", "radius-wrap"):
