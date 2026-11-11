@@ -27,6 +27,8 @@ env/
 *.egg-info/
 build/
 dist/
+# PyInstaller spec（构建过程产物：由 scripts/build_exe.py 按需生成，配方单源在该脚本，不入库）
+*.spec
 
 # 前端（预留）
 node_modules/

@@ -2,7 +2,7 @@
 
 基于 Google Weather Lab / WeatherNext Cyclones (WNC) 热带气旋预报数据，构建一套**导入 → 解析 → 交互式网页可视化**的工具：用户在页面上导入预报轨迹 CSV，系统解析后在地图上展示气旋路径与强度，并叠加基础交互功能。必要时采用前后端分离方案。
 
-> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点内联选择器 + 经纬网格）、服务简单入口与 configs 统一、mean 口径截断统一（最近接近修复 + 截断规则后端单源）已落地（M1–M13）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
+> 当前状态：`typhoon_track` 正式包、三栏 Web 工作台（地图 + 曲线联动 + 集合概率特征 + 影响概率 + 终生峰值 + 预存地点内联选择器 + 经纬网格）、服务简单入口与 configs 统一、mean 口径截断统一（最近接近修复 + 截断规则后端单源）、PyInstaller onedir 打包（双击可执行自动开浏览器）已落地（M1–M14）；下一迭代候选见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
 
 ## 目录结构
 
@@ -16,6 +16,7 @@ show_typhoon_track/
 │   ├── cli.py                         # 重组 CLI 入口（python -m typhoon_track）
 │   └── __main__.py
 ├── tests/                             # 正式测试（core 单测 + service/api 集成 + CLI 行为一致性对照）
+├── scripts/                           # 打包脚本（M14：build_exe.py——PyInstaller onedir 配方单源，spec 为过程产物不入库）
 ├── docs/                              # 验收与确认记录（含 M2/M3 验收、瓦片数据源确认）
 ├── app.py                             # Web 服务简单入口（python app.py，M10；监听配置 configs/server.json）
 ├── configs/                           # 运行时配置（tiles.toml 瓦片：url_template/attribution/max_zoom；server.json 服务监听：host/port）
@@ -170,6 +171,7 @@ python -m pytest -q                   # L5 功能测试（285 项基线，含 Pl
 - ✅ **mean 口径截断统一（M11）**：`core.ensemble` 截断规则纯函数（`low_denominator_cut_lead`，唯一规范实现）→ `ensemble-stats` 响应 `mean_cut_lead_h` → 前端地图 mean 线/时效滑块域/强度图/气压图均值线统一消费（成员细线不截断）；最近接近（mean 口径）限截断内时次，极端全低分母 closest=null 并以 `closest_note` 说明原因
 - ✅ **预存地点内联选择器（M12）**：搜索名称/备注 + 洋区筹码（承接 M9 复选框语义，含计数/置灰/持久勾选/气旋洋区标记）+ 常驻列表（文件顺序、已选高亮、当前目标行）；弃用原生 select 弹层（真实输入管道缺陷归因与 Chromium 上报素材见 `docs/M12预存地点下拉缺陷归因与复现记录_20261028.md`）
 - ✅ **地图经纬网格（M13）**：预设 zoom→档位表（z4=5°…z≥10=0.1°，渲染期只查表）+ 度数标注（紧凑式、贴视口边缘）；独立图层居瓦片之上/轨迹之下，跨 180° 与世界副本连续绘制；左栏「地图图层」开关默认开（档位表与问题处置见 `docs/M13经纬网格验收记录_20261028.md`）
+- ✅ **PyInstaller 打包（M14）**：`python scripts/build_exe.py` 一键构建 onedir 可执行目录（`dist/typhoon-track/`，双击启动后自动打开浏览器）；configs 与 places.example 外置产物目录可编辑、uploads 数据落可执行旁持久；spec 与构建产物不入库（配方单源构建脚本）；Windows/Linux 同命令各平台本机构建（决策与 Linux 冒烟见 `docs/打包方案验收记录_20261111.md`）
 - 📋 **候补**：跨数据集叠加对比、瓦片数据源切换等
 
 开发用里程碑基线（状态、提交、依赖与验收要点）见 [docs/里程碑基线.md](./docs/里程碑基线.md)。
