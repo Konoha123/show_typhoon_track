@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from collections.abc import MutableMapping
 from dataclasses import dataclass
@@ -17,7 +18,22 @@ from typhoon_track.service.datasets import DatasetStore
 from . import routes_api, routes_pages
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def default_project_root() -> Path:
+    """项目根定位（configs/places/uploads 的共同父目录）。
+
+    源码运行 = 仓库根；frozen（PyInstaller onedir）= 可执行文件所在目录——
+    configs/places 随构建外置于 exe 旁（可编辑），uploads 运行时创建于同处（数据持久）。
+    WEB_DIR 不经此函数：包内 web 资源由 PyInstaller datas 落在 _internal/typhoon_track/web，
+    ``__file__`` 相对解析天然正确。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+PROJECT_ROOT = default_project_root()
 
 
 class NoCacheStaticFiles(StaticFiles):
