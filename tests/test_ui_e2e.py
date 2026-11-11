@@ -619,7 +619,7 @@ def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impac
 
 
 def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
-    # M15：CPA 距离分档数值行 + 混合玫瑰图（散点 + 环外注记）。
+    # M15：CPA 距离分档数值行 + 玫瑰图；M15-R1：径向全线性 + 悬停格 readout。
     # 几何构造（目标 20,130）：C ~1.1 km 原点区计入 ≤100；A ~150 km 入 ≤200；
     # B ~500 km 入 ≤800；D ~1200 km 环外不入档不画点
     _set_target_by_inputs(page, live_url_rose, lat="20.0", lon="130.0")
@@ -632,12 +632,44 @@ def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
     assert "中心最近距离 ≤ 200 km" in text and "50.0%" in text and "2/4 成员" in text
     assert "中心最近距离 ≤ 400 km" in text and "2/4 成员" in text
     assert "中心最近距离 ≤ 800 km" in text and "75.0%" in text and "3/4 成员" in text
-    assert "原点(<30 km): 1" in text and "环外(>800 km): 1" in text
     rose = page.locator("svg.cpa-rose")
     assert rose.get_attribute("data-cpa-points") == "3"  # 环外成员 D 不画点
     assert rose.get_attribute("data-cpa-radii") == "100,200,400,800"
     assert rose.get_attribute("data-cpa-origin-km") == "30"
     assert page.locator("svg.cpa-rose circle.cpa-dot").count() == 3
+    # M15-R1 线性几何：dot 的 cx/cy（viewBox 单位）满足 r = d/800×132——A 150 km、
+    # B ~500 km、C 1.1 km 原点区自然落位近圆心（非钉死）；锁死全线性映射防口径回退
+    radii_px = page.evaluate(
+        """
+        () => Object.fromEntries([...document.querySelectorAll('svg.cpa-rose circle.cpa-dot')]
+          .map((c) => {
+            const member = c.querySelector('title').textContent.match(/成员 (\\w+)/)?.[1];
+            const r = Math.hypot(c.cx.baseVal.value - 160, c.cy.baseVal.value - 160);
+            return [member, r];
+          }))
+        """
+    )
+    assert abs(radii_px["A"] - (150.0 / 800) * 132) < 0.2
+    assert abs(radii_px["B"] - (500.0 / 800) * 132) < 1.0  # B 构造落点 ~499.9 km
+    assert radii_px["C"] < 1.0  # 1.1 km → ~0.2 px，自然圆心簇
+    # M15-R1 readout：默认态常显 成员/原点/环外（含比例）
+    readout = page.locator("[data-cpa-readout]")
+    assert readout.inner_text() == "成员 4 · 原点 1 (25.0%) · 环外 1 (25.0%)"
+    # 悬停 N 扇区 (100–200] 格（viewBox 点：方位 ~340°、距离 150 km，避开 A 点本尊）
+    # → readout 换格详情 + data-hover-bin；移出图区恢复默认态。
+    # 影响卡片 max-height 360px 可滚动：先滚入视再取 bounding_box，否则坐标落卡片外
+    rose.scroll_into_view_if_needed()
+    box = rose.bounding_box()
+    assert box is not None
+    scale = box["width"] / 320
+    page.mouse.move(box["x"] + 151.5 * scale, box["y"] + 136.7 * scale)
+    assert readout.inner_text() == "N (100–200] km | 1 (25.0%)"
+    rose_wrap = page.locator(".cpa-rose-wrap")
+    assert rose_wrap.get_attribute("data-hover-bin") == "N:200"
+    page.mouse.move(10, 10)
+    page.wait_for_timeout(100)
+    assert readout.inner_text() == "成员 4 · 原点 1 (25.0%) · 环外 1 (25.0%)"
+    assert rose_wrap.get_attribute("data-hover-bin") == ""
 
 
 def test_target_reference_circles_colored_and_visible(page, live_url_impact: str) -> None:
@@ -717,10 +749,17 @@ def test_place_list_selects_target(page, live_url_impact: str) -> None:
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
     assert "那霸" in text  # 目标行显示预存地名
-    # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）；M15 起分档 4 行
-    # （全部成员环外，见注记「环外(>800 km): 2」）同样为 0 → 共 8 处 0.0%
-    assert text.count("0.0%") == 8
-    assert "环外(>800 km): 2" in text
+    # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）；M15 分档 4 行全 0
+    # （0/2 成员）；M15-R1 起原点/环外计数并入 readout 默认态（环外 2 = 100.0%）
+    band_rows = page.locator("#impact-body [data-band-radius]")
+    assert band_rows.count() == 4
+    for i in range(4):
+        band_text = band_rows.nth(i).inner_text()
+        assert "0.0%" in band_text and "0/2 成员" in band_text
+    assert (
+        page.locator("[data-cpa-readout]").inner_text()
+        == "成员 2 · 原点 0 (0.0%) · 环外 2 (100.0%)"
+    )
     # 选中行高亮 + 「当前目标」行
     assert page.locator("[data-place='那霸']").get_attribute("aria-selected") == "true"
     assert "当前目标：那霸" in page.locator("#place-foot").inner_text()

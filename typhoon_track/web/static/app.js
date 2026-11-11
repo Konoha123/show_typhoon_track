@@ -1154,19 +1154,17 @@ function renderImpactCard() {
   const rows = data.thresholds.map((t) => impactRow(t.label, t.fraction, t.hit_members, t.total_members)).join('') +
     // M7d：核心强风区（距中心 ≤ RMW 全向圆；rmw 缺失的时次不命中，留在分母）
     (data.core_wind ? impactRow(data.core_wind.label, data.core_wind.fraction, data.core_wind.hit_members, data.core_wind.total_members) : '');
-  // M15：CPA 距离分档数值行（累积 ≤，含等号；全程时次口径）+ 混合玫瑰图（散点+分箱）
+  // M15：CPA 距离分档数值行（累积 ≤，含等号；全程时次口径）+ 玫瑰图；
+  // M15-R1：图改为全线性 + 悬停格 readout（原点/环外计数并入 readout 默认态，底注废止）
   let cpaHtml = '';
   if (Array.isArray(data.closest_distance_bands) && Array.isArray(data.closest_members)) {
     const bandRows = data.closest_distance_bands
       .map((b) => impactRow(`中心最近距离 ≤ ${b.radius_km} km`, b.fraction, b.hit_members, b.total_members,
         ` data-band-radius="${b.radius_km}"`))
       .join('');
-    const maxR = TARGET_REFERENCE_RADII[TARGET_REFERENCE_RADII.length - 1];
-    const note = `原点(<${CPA_ORIGIN_KM} km): ${data.closest_origin_members ?? 0} · 环外(>${maxR} km): ${data.closest_beyond_members ?? 0}`;
     cpaHtml = '<h3>中心最近距离分档（全程时次）</h3>' + bandRows +
       '<h3>CPA 散布（8 方位 × 距离环）</h3>' +
-      renderCpaRoseHtml(data) +
-      `<p class="cpa-note">${note}</p>`;
+      renderCpaRoseHtml(data);
   }
   const c = data.closest;
   const when = c && c.valid ? `（${c.valid.replace('T', ' ').slice(0, 16)}Z）` : '';
@@ -1181,84 +1179,148 @@ function renderImpactCard() {
     : `<p class="muted">${escapeHtml(data.closest_note ?? '无有效均值位置，最近接近不可用')}</p>`;
   body.innerHTML = `<h3>目标：${escapeHtml(targetLabel())}</h3>` + rows + cpaHtml + closestHtml;
   wrap.setAttribute('data-impact-total', String(data.thresholds[0]?.total_members ?? ''));
+  attachCpaRoseHover(data); // M15-R1：悬停分箱 readout（载荷随卡片重建重挂）
 }
 
-/* M15 CPA 混合玫瑰图（自绘 SVG，无第三方依赖）：等宽序数环带（≤100/200/400/800）
- * + 8 扇区导轨（分界 22.5° 起）；散点层 = 一成员一点（真实方位角 + 带内分段线性
- * 径向映射，<30 km 钉圆心、>800 km 不画）；分箱层 = 8×4 格计数（>0 才标）。
+/* M15-R1 CPA 散布玫瑰图（自绘 SVG，无第三方依赖）：径向**全线性**映射
+ * r = d/最大档 × rOut（等宽序数环带废止——分段线性各带压缩比不一致致距离感失真），
+ * 环导轨画在真实比例位置（100/200/400/800 → 半径 12.5%/25%/50%/100%）+ 8 扇区
+ * 导轨（分界 22.5° 起）；散点一成员一点（真实方位角；原点区 <30 km 退化为纯统计
+ * 箱，自然落位 ≤5px 圆心簇、近中心多点纯重叠；>最大档环外不画）。格计数无常驻
+ * 图内文本：悬停由 mousemove 数学分箱驱动 readout（复刻强度分布图 .readout 交互
+ * 形态），空格「- (0.0%)」；默认态常显 成员/原点/环外（含比例，环外图外不可悬停）。
  * 半径档位与原点阈值读注入（STATS.closestRadii/closestOriginKm，单源 core.impact）。 */
+const CPA_ROSE_SECTORS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const CPA_ROSE_CENTER = 160; // viewBox 320×320 的圆心
+const CPA_ROSE_R_OUT = 132;
+
+function cpaPolar(bearingDeg, r) {
+  const theta = bearingDeg * Math.PI / 180;
+  return [CPA_ROSE_CENTER + r * Math.sin(theta), CPA_ROSE_CENTER - r * Math.cos(theta)];
+}
+
+function cpaPercent(count, total) {
+  return total ? `${((count * 100) / total).toFixed(1)}%` : '—';
+}
+
 function renderCpaRoseHtml(data) {
   const radii = TARGET_REFERENCE_RADII;
   const maxR = radii[radii.length - 1];
-  const sectors = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const cx = 160, cy = 160, rIn = 30, rOut = 132;
-  const bandWidth = (rOut - rIn) / radii.length;
-  const pos = (bearingDeg, r) => {
-    const theta = bearingDeg * Math.PI / 180;
-    return [cx + r * Math.sin(theta), cy - r * Math.cos(theta)];
-  };
+  const kmToPx = (d) => (d / maxR) * CPA_ROSE_R_OUT;
   let grid = '';
-  for (let k = 1; k <= radii.length; k += 1) {
-    grid += `<circle cx="${cx}" cy="${cy}" r="${(rIn + k * bandWidth).toFixed(1)}" class="cpa-ring"/>`;
+  for (const radius of radii) {
+    grid += `<circle cx="${CPA_ROSE_CENTER}" cy="${CPA_ROSE_CENTER}" r="${kmToPx(radius).toFixed(1)}" class="cpa-ring"/>`;
   }
   for (let i = 0; i < 8; i += 1) {
-    const [x1, y1] = pos(22.5 + i * 45, rIn);
-    const [x2, y2] = pos(22.5 + i * 45, rOut);
+    const [x1, y1] = cpaPolar(22.5 + i * 45, 0);
+    const [x2, y2] = cpaPolar(22.5 + i * 45, CPA_ROSE_R_OUT);
     grid += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="cpa-spoke"/>`;
   }
   let labels = '';
-  radii.forEach((radius, idx) => {
-    const [, y] = pos(0, rIn + (idx + 1) * bandWidth);
-    labels += `<text x="${cx}" y="${(y - 2).toFixed(1)}" class="cpa-ring-label">${radius}</text>`;
-  });
-  sectors.forEach((sector, idx) => {
-    const [x, y] = pos(idx * 45, rOut + 12);
+  for (const radius of radii) {
+    const [, y] = cpaPolar(0, kmToPx(radius));
+    labels += `<text x="${CPA_ROSE_CENTER}" y="${(y - 2).toFixed(1)}" class="cpa-ring-label">${radius}</text>`;
+  }
+  CPA_ROSE_SECTORS.forEach((sector, idx) => {
+    const [x, y] = cpaPolar(idx * 45, CPA_ROSE_R_OUT + 12);
     labels += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="cpa-sector-label">${sector}</text>`;
   });
-  // 分箱层：8×4 格计数（响应固定序展开，>0 才标注）
-  let cellTexts = '';
-  if (Array.isArray(data.closest_bearing_cells)) {
-    const cellCounts = new Map(data.closest_bearing_cells.map((cell) => [`${cell.sector}:${cell.radius_km}`, cell.hit_members]));
-    sectors.forEach((sector, sIdx) => {
-      radii.forEach((radius, rIdx) => {
-        const count = cellCounts.get(`${sector}:${radius}`) ?? 0;
-        if (!count) return;
-        const [x, y] = pos(sIdx * 45, rIn + (rIdx + 0.5) * bandWidth);
-        cellTexts += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="cpa-cell-count">${count}</text>`;
-      });
-    });
-  }
-  // 散点层：一成员一点；原点区成员钉圆心（多个时微环散开避免完全重叠）
+  // 散点层：一成员一点，全线性落位（环外不画，readout 默认态常显其计数）
   let dots = '';
   let drawn = 0;
-  const originEntries = [];
   for (const m of data.closest_members) {
-    if (m.distance_km > maxR) continue; // 环外不画（图下注记计数）
-    if (m.distance_km < CPA_ORIGIN_KM) { originEntries.push(m); continue; }
-    let bandIdx = radii.findIndex((r) => m.distance_km <= r);
-    if (bandIdx < 0) bandIdx = radii.length - 1;
-    const lower = bandIdx === 0 ? CPA_ORIGIN_KM : radii[bandIdx - 1];
-    const upper = radii[bandIdx];
-    const t = Math.min(1, Math.max(0, (m.distance_km - lower) / (upper - lower))); // 带内分段线性
-    const [x, y] = pos(m.bearing_deg, rIn + (bandIdx + t) * bandWidth);
-    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km · ${m.sector} · 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
+    if (m.distance_km > maxR) continue;
+    const [x, y] = cpaPolar(m.bearing_deg, kmToPx(m.distance_km));
+    const where = m.distance_km < CPA_ORIGIN_KM ? ' · 原点区（正面穿越）' : ` · ${m.sector}`;
+    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km${where} · 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
     drawn += 1;
   }
-  const nOrigin = originEntries.length;
-  originEntries.forEach((m, i) => {
-    const spread = nOrigin > 1 ? 5 : 0;
-    const [x, y] = pos((360 * i) / Math.max(nOrigin, 1), spread);
-    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km · 原点区（正面穿越）· 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
-    drawn += 1;
-  });
-  return `<svg class="cpa-rose" viewBox="0 0 320 320" role="img"` +
-    ` aria-label="CPA 散布玫瑰图（8 方位 × 距离环，等宽序数环带）"` +
-    ` data-cpa-points="${drawn}" data-cpa-radii="${radii.join(',')}" data-cpa-origin-km="${CPA_ORIGIN_KM}">` +
-    grid + labels + cellTexts + dots + '</svg>';
+  const total = data.closest_distance_bands[0]?.total_members ?? drawn;
+  const defaultReadout = cpaRoseDefaultReadout(data, total);
+  return `<div class="cpa-rose-wrap">` +
+    `<div class="cpa-readout" data-cpa-readout>${defaultReadout}</div>` +
+    `<svg class="cpa-rose" viewBox="0 0 320 320" role="img"` +
+    ` aria-label="CPA 散布玫瑰图（8 方位 × 距离环，径向全线性）"` +
+    ` data-cpa-points="${drawn}" data-cpa-radii="${radii.join(',')}"` +
+    ` data-cpa-origin-km="${CPA_ORIGIN_KM}" data-cpa-total="${total}">` +
+    grid + labels + '<path class="cpa-hover-cell" d="" data-hover-cell/>' + dots +
+    '</svg></div>';
 }
 
 function cpaDotHtml(x, y, title) {
   return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"><title>${escapeHtml(title)}</title></circle>`;
+}
+
+function cpaRoseDefaultReadout(data, total) {
+  const origin = data.closest_origin_members ?? 0;
+  const beyond = data.closest_beyond_members ?? 0;
+  return `成员 ${total} · 原点 ${origin} (${cpaPercent(origin, total)}) · 环外 ${beyond} (${cpaPercent(beyond, total)})`;
+}
+
+/* M15-R1 悬停分箱：svg mousemove 将光标换算回 viewBox 极坐标（方位→扇区、半径→
+ * 环带，33 命中域零额外 DOM；扇区分界与 core.compass_8 同式），更新复用 wedge
+ * 高亮与 readout 文案；mouseleave / 光标出圈恢复默认态。data-hover-bin 暴露
+ * 当前格（如 "N:200"/"origin"）供 E2E 断言。 */
+function attachCpaRoseHover(data) {
+  const wrap = document.querySelector('.cpa-rose-wrap');
+  const svg = wrap?.querySelector('svg.cpa-rose');
+  const readout = wrap?.querySelector('[data-cpa-readout]');
+  const wedge = svg?.querySelector('[data-hover-cell]');
+  if (!wrap || !svg || !readout || !wedge) return;
+  const radii = TARGET_REFERENCE_RADII;
+  const maxR = radii[radii.length - 1];
+  const total = data.closest_distance_bands[0]?.total_members ?? 0;
+  const cellCounts = new Map(
+    (data.closest_bearing_cells ?? []).map((c) => [`${c.sector}:${c.radius_km}`, c.hit_members]),
+  );
+  const kmToPx = (d) => (d / maxR) * CPA_ROSE_R_OUT;
+  const reset = () => {
+    wedge.setAttribute('d', '');
+    readout.textContent = cpaRoseDefaultReadout(data, total);
+    wrap.setAttribute('data-hover-bin', '');
+  };
+  svg.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    // client → viewBox（viewBox 320×320 等比）
+    const vx = ((e.clientX - rect.left) / rect.width) * 320;
+    const vy = ((e.clientY - rect.top) / rect.height) * 320;
+    const dx = vx - CPA_ROSE_CENTER, dy = vy - CPA_ROSE_CENTER;
+    const rPx = Math.hypot(dx, dy);
+    if (rPx > CPA_ROSE_R_OUT) { reset(); return; } // 圈外（含扇区标签区）= 无格
+    const bearing = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360; // 正北 0°、顺时针
+    const distance = (rPx / CPA_ROSE_R_OUT) * maxR;
+    if (distance < CPA_ORIGIN_KM) {
+      const count = data.closest_origin_members ?? 0;
+      const rPxOrigin = kmToPx(CPA_ORIGIN_KM);
+      wedge.setAttribute('d', `M ${CPA_ROSE_CENTER - rPxOrigin} ${CPA_ROSE_CENTER}` +
+        ` A ${rPxOrigin} ${rPxOrigin} 0 1 0 ${CPA_ROSE_CENTER + rPxOrigin} ${CPA_ROSE_CENTER}` +
+        ` A ${rPxOrigin} ${rPxOrigin} 0 1 0 ${CPA_ROSE_CENTER - rPxOrigin} ${CPA_ROSE_CENTER} Z`);
+      readout.textContent = `原点(<${CPA_ORIGIN_KM} km) | ${count || '-'} (${count ? cpaPercent(count, total) : '0.0%'})`;
+      wrap.setAttribute('data-hover-bin', 'origin');
+      return;
+    }
+    const sectorIdx = Math.floor(((bearing % 360) + 22.5) / 45) % 8; // 同 core.compass_8
+    let ringIdx = radii.findIndex((r) => distance <= r);
+    if (ringIdx < 0) { reset(); return; }
+    const sector = CPA_ROSE_SECTORS[sectorIdx];
+    const radius = radii[ringIdx];
+    const loKm = ringIdx === 0 ? CPA_ORIGIN_KM : radii[ringIdx - 1];
+    const count = cellCounts.get(`${sector}:${radius}`) ?? 0;
+    // 扇环楔形：外弧顺时针（sweep=1）、内弧逆时针（sweep=0）、45° < 180°（large-arc=0）
+    const a0 = 22.5 + sectorIdx * 45;
+    const [xo, yo] = cpaPolar(a0, kmToPx(radius));
+    const [x1, y1] = cpaPolar(a0 + 45, kmToPx(radius));
+    const [xi, yi] = cpaPolar(a0 + 45, kmToPx(loKm));
+    const [x2, y2] = cpaPolar(a0, kmToPx(loKm));
+    wedge.setAttribute('d', `M ${xo.toFixed(1)} ${yo.toFixed(1)}` +
+      ` A ${kmToPx(radius).toFixed(1)} ${kmToPx(radius).toFixed(1)} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}` +
+      ` L ${xi.toFixed(1)} ${yi.toFixed(1)}` +
+      ` A ${kmToPx(loKm).toFixed(1)} ${kmToPx(loKm).toFixed(1)} 0 0 0 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`);
+    readout.textContent = `${sector} (${loKm}–${radius}] km | ${count || '-'} (${count ? cpaPercent(count, total) : '0.0%'})`;
+    wrap.setAttribute('data-hover-bin', `${sector}:${radius}`);
+  });
+  svg.addEventListener('mouseleave', reset);
+  reset(); // 初始默认态
 }
 
 async function loadPlaces() {
