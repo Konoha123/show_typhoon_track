@@ -135,6 +135,18 @@ input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
 .muted-inline { font-weight: 400; font-size: .72rem; color: #667; margin-left: 4px; }
 .impact-error { color: #b91c1c; font-size: .8rem; margin: .4rem 0; }
 
+/* M15 CPA 混合玫瑰图（影响概率卡片内自绘 SVG）：等宽序数环带 + 8 扇区导轨 +
+ * 散点层（一成员一点）与分箱层（8×4 格计数） */
+.cpa-rose { display: block; width: 100%; max-width: 320px; margin: .35rem auto .1rem; }
+.cpa-rose .cpa-ring { fill: none; stroke: #cbd5e1; stroke-width: 1; }
+.cpa-rose .cpa-spoke { stroke: #e2e8f0; stroke-width: 1; }
+.cpa-rose .cpa-ring-label { font-size: 9px; fill: #64748b; text-anchor: middle; }
+.cpa-rose .cpa-sector-label { font-size: 10px; fill: #475569; text-anchor: middle; font-weight: 600; }
+.cpa-rose .cpa-cell-count { font-size: 9px; fill: #64748b; text-anchor: middle; }
+.cpa-rose .cpa-dot { fill: #1e293b; fill-opacity: .85; }
+.cpa-rose .cpa-dot:hover { fill: #0ea5e9; fill-opacity: 1; }
+.cpa-note { margin: .1rem 0 .35rem; font-size: .72rem; color: #667; text-align: center; }
+
 /* M8 终生峰值：第三栏聚合卡（强度分布图下方）+ 每成员明细第四栏（默认隐藏，展开后与左/中/右三栏并列） */
 #peak-agg-foot { padding: 0 14px 10px; }
 #peak-agg-foot button { margin-top: .2rem; }

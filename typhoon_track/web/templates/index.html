@@ -6,8 +6,8 @@
 <title>WNC 台风轨迹工作台</title>
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M13 前端改动 bump m13 -->
-<link rel="stylesheet" href="/static/style.css?v=m13">
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M15 前端改动 bump m15 -->
+<link rel="stylesheet" href="/static/style.css?v=m15">
 </head>
 <body>
 <aside id="panel">
@@ -80,7 +80,8 @@
     <button id="target-apply" type="button">应用坐标</button>
     <button id="target-pick" type="button" class="secondary">地图点选</button>
     <button id="target-clear" type="button" class="secondary">清除目标</button>
-    <div id="target-circle-legend" aria-label="参考圆图例（km，仅视觉参考，不参与判定）"></div>
+    <!-- M15：参考圆档位已升格为 CPA 距离分档口径（单源后端注入），不再是纯视觉参考 -->
+    <div id="target-circle-legend" aria-label="参考圆图例（km，中心最近距离分档环）"></div>
   </section>
 
   <section>
@@ -136,7 +137,7 @@
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
 <script>window.BASIN_CATALOG = {{ basin_catalog|safe }};</script>
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M13 前端改动 bump m13 -->
-<script type="module" src="/static/app.js?v=m13"></script>
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M15 前端改动 bump m15 -->
+<script type="module" src="/static/app.js?v=m15"></script>
 </body>
 </html>

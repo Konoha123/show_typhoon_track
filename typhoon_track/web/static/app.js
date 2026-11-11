@@ -1037,10 +1037,18 @@ async function loadStats() {
 
 /* ---------- 目标地点与影响概率（M6）：预存地点/坐标输入/地图点选 + 三级概率与最近接近 ---------- */
 
-const TARGET_REFERENCE_RADII = [100, 200, 400, 800]; // 参考圆半径 km（仅视觉参考，不参与判定）
+// M15：CPA 距离分档档位与原点区阈值（单源 core.impact，随 STATS_CONFIG 注入）——
+// 统计口径与参考圆绘制共用同一来源，前端不再硬编码 100/200/400/800
+const TARGET_REFERENCE_RADII = STATS.closestRadii;
+const CPA_ORIGIN_KM = STATS.closestOriginKm;
 // M7a 分级配色：每圈一色（玫红/橙/金/紫，已避让强度色阶、成员色与概率圆蓝），
-// 实线 2px/0.9 不透明，明暗瓦片下均易辨认；色值与左栏图例同源
+// 实线 2px/0.9 不透明，明暗瓦片下均易辨认；色值与左栏图例同源；
+// M15 起档位由注入提供，未配色档回退中性蓝灰（调整档位时圆环仍可辨）
 const TARGET_REFERENCE_CIRCLE_COLORS = { 100: '#db2777', 200: '#ea580c', 400: '#ca8a04', 800: '#6d28d9' };
+const TARGET_CIRCLE_FALLBACK_COLOR = '#475569';
+function targetCircleColor(radius) {
+  return TARGET_REFERENCE_CIRCLE_COLORS[radius] ?? TARGET_CIRCLE_FALLBACK_COLOR;
+}
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => ({
@@ -1068,13 +1076,13 @@ function renderTargetLayer() {
   marker.bindPopup([
     `<b>目标地点：${escapeHtml(state.target.label ?? '临时坐标')}</b>`,
     `坐标: ${state.target.lat.toFixed(4)}, ${state.target.lon.toFixed(4)}`,
-    `参考圆: ${TARGET_REFERENCE_RADII.join('/')} km（仅视觉参考，不参与判定）`,
+    `参考圆（中心最近距离分档环）: ${TARGET_REFERENCE_RADII.join('/')} km`,
   ].join('<br>'));
   for (let i = TARGET_REFERENCE_RADII.length - 1; i >= 0; i -= 1) {
     const radius = TARGET_REFERENCE_RADII[i];
     // 大圆先画小圆后画（Canvas 后画在上层）；与概率圆同渲染器，不拦截下层交互
     L.polygon(geoCirclePoints(center, radius), {
-      color: TARGET_REFERENCE_CIRCLE_COLORS[radius], weight: 2, opacity: 0.9,
+      color: targetCircleColor(radius), weight: 2, opacity: 0.9,
       fill: false, interactive: false, smoothFactor: 0, noClip: true,
       renderer: statsCircleRenderer,
     }).addTo(targetLayer);
@@ -1138,14 +1146,28 @@ function renderImpactCard() {
     return;
   }
   const data = state.impact;
-  const impactRow = (label, fraction, hit, total) => {
+  const impactRow = (label, fraction, hit, total, attr = '') => {
     const pct = fraction == null ? '—' : `${(fraction * 100).toFixed(1)}%`;
-    return `<div class="impact-row"><span>${escapeHtml(label)}</span>` +
+    return `<div class="impact-row"${attr}><span>${escapeHtml(label)}</span>` +
       `<span class="impact-value">${pct}<span class="muted-inline">${hit}/${total} 成员</span></span></div>`;
   };
   const rows = data.thresholds.map((t) => impactRow(t.label, t.fraction, t.hit_members, t.total_members)).join('') +
     // M7d：核心强风区（距中心 ≤ RMW 全向圆；rmw 缺失的时次不命中，留在分母）
     (data.core_wind ? impactRow(data.core_wind.label, data.core_wind.fraction, data.core_wind.hit_members, data.core_wind.total_members) : '');
+  // M15：CPA 距离分档数值行（累积 ≤，含等号；全程时次口径）+ 混合玫瑰图（散点+分箱）
+  let cpaHtml = '';
+  if (Array.isArray(data.closest_distance_bands) && Array.isArray(data.closest_members)) {
+    const bandRows = data.closest_distance_bands
+      .map((b) => impactRow(`中心最近距离 ≤ ${b.radius_km} km`, b.fraction, b.hit_members, b.total_members,
+        ` data-band-radius="${b.radius_km}"`))
+      .join('');
+    const maxR = TARGET_REFERENCE_RADII[TARGET_REFERENCE_RADII.length - 1];
+    const note = `原点(<${CPA_ORIGIN_KM} km): ${data.closest_origin_members ?? 0} · 环外(>${maxR} km): ${data.closest_beyond_members ?? 0}`;
+    cpaHtml = '<h3>中心最近距离分档（全程时次）</h3>' + bandRows +
+      '<h3>CPA 散布（8 方位 × 距离环）</h3>' +
+      renderCpaRoseHtml(data) +
+      `<p class="cpa-note">${note}</p>`;
+  }
   const c = data.closest;
   const when = c && c.valid ? `（${c.valid.replace('T', ' ').slice(0, 16)}Z）` : '';
   // M11a：closest 为 null 时优先展示后端 closest_note 文案（区分「截断内无有效时次」与
@@ -1157,8 +1179,86 @@ function renderImpactCard() {
       `<div class="impact-row"><span>气旋方位</span><span>${escapeHtml(c.compass)}（${c.bearing_deg.toFixed(1)}°）</span></div>` +
       `<div class="impact-row"><span>强度（自算均值）</span><span>风 ${c.mean_wind == null ? '—' : c.mean_wind.toFixed(0)} kt / 压 ${c.mean_pressure == null ? '—' : c.mean_pressure.toFixed(0)} hPa</span></div>`
     : `<p class="muted">${escapeHtml(data.closest_note ?? '无有效均值位置，最近接近不可用')}</p>`;
-  body.innerHTML = `<h3>目标：${escapeHtml(targetLabel())}</h3>` + rows + closestHtml;
+  body.innerHTML = `<h3>目标：${escapeHtml(targetLabel())}</h3>` + rows + cpaHtml + closestHtml;
   wrap.setAttribute('data-impact-total', String(data.thresholds[0]?.total_members ?? ''));
+}
+
+/* M15 CPA 混合玫瑰图（自绘 SVG，无第三方依赖）：等宽序数环带（≤100/200/400/800）
+ * + 8 扇区导轨（分界 22.5° 起）；散点层 = 一成员一点（真实方位角 + 带内分段线性
+ * 径向映射，<30 km 钉圆心、>800 km 不画）；分箱层 = 8×4 格计数（>0 才标）。
+ * 半径档位与原点阈值读注入（STATS.closestRadii/closestOriginKm，单源 core.impact）。 */
+function renderCpaRoseHtml(data) {
+  const radii = TARGET_REFERENCE_RADII;
+  const maxR = radii[radii.length - 1];
+  const sectors = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const cx = 160, cy = 160, rIn = 30, rOut = 132;
+  const bandWidth = (rOut - rIn) / radii.length;
+  const pos = (bearingDeg, r) => {
+    const theta = bearingDeg * Math.PI / 180;
+    return [cx + r * Math.sin(theta), cy - r * Math.cos(theta)];
+  };
+  let grid = '';
+  for (let k = 1; k <= radii.length; k += 1) {
+    grid += `<circle cx="${cx}" cy="${cy}" r="${(rIn + k * bandWidth).toFixed(1)}" class="cpa-ring"/>`;
+  }
+  for (let i = 0; i < 8; i += 1) {
+    const [x1, y1] = pos(22.5 + i * 45, rIn);
+    const [x2, y2] = pos(22.5 + i * 45, rOut);
+    grid += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="cpa-spoke"/>`;
+  }
+  let labels = '';
+  radii.forEach((radius, idx) => {
+    const [, y] = pos(0, rIn + (idx + 1) * bandWidth);
+    labels += `<text x="${cx}" y="${(y - 2).toFixed(1)}" class="cpa-ring-label">${radius}</text>`;
+  });
+  sectors.forEach((sector, idx) => {
+    const [x, y] = pos(idx * 45, rOut + 12);
+    labels += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="cpa-sector-label">${sector}</text>`;
+  });
+  // 分箱层：8×4 格计数（响应固定序展开，>0 才标注）
+  let cellTexts = '';
+  if (Array.isArray(data.closest_bearing_cells)) {
+    const cellCounts = new Map(data.closest_bearing_cells.map((cell) => [`${cell.sector}:${cell.radius_km}`, cell.hit_members]));
+    sectors.forEach((sector, sIdx) => {
+      radii.forEach((radius, rIdx) => {
+        const count = cellCounts.get(`${sector}:${radius}`) ?? 0;
+        if (!count) return;
+        const [x, y] = pos(sIdx * 45, rIn + (rIdx + 0.5) * bandWidth);
+        cellTexts += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" class="cpa-cell-count">${count}</text>`;
+      });
+    });
+  }
+  // 散点层：一成员一点；原点区成员钉圆心（多个时微环散开避免完全重叠）
+  let dots = '';
+  let drawn = 0;
+  const originEntries = [];
+  for (const m of data.closest_members) {
+    if (m.distance_km > maxR) continue; // 环外不画（图下注记计数）
+    if (m.distance_km < CPA_ORIGIN_KM) { originEntries.push(m); continue; }
+    let bandIdx = radii.findIndex((r) => m.distance_km <= r);
+    if (bandIdx < 0) bandIdx = radii.length - 1;
+    const lower = bandIdx === 0 ? CPA_ORIGIN_KM : radii[bandIdx - 1];
+    const upper = radii[bandIdx];
+    const t = Math.min(1, Math.max(0, (m.distance_km - lower) / (upper - lower))); // 带内分段线性
+    const [x, y] = pos(m.bearing_deg, rIn + (bandIdx + t) * bandWidth);
+    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km · ${m.sector} · 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
+    drawn += 1;
+  }
+  const nOrigin = originEntries.length;
+  originEntries.forEach((m, i) => {
+    const spread = nOrigin > 1 ? 5 : 0;
+    const [x, y] = pos((360 * i) / Math.max(nOrigin, 1), spread);
+    dots += cpaDotHtml(x, y, `成员 ${m.member}：${Math.round(m.distance_km)} km · 原点区（正面穿越）· 时效 ${m.lead_h == null ? '—' : m.lead_h} h`);
+    drawn += 1;
+  });
+  return `<svg class="cpa-rose" viewBox="0 0 320 320" role="img"` +
+    ` aria-label="CPA 散布玫瑰图（8 方位 × 距离环，等宽序数环带）"` +
+    ` data-cpa-points="${drawn}" data-cpa-radii="${radii.join(',')}" data-cpa-origin-km="${CPA_ORIGIN_KM}">` +
+    grid + labels + cellTexts + dots + '</svg>';
+}
+
+function cpaDotHtml(x, y, title) {
+  return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"><title>${escapeHtml(title)}</title></circle>`;
 }
 
 async function loadPlaces() {
@@ -1878,7 +1978,7 @@ $('p-apply').addEventListener('click', () => {
     item.className = 'item';
     const ring = document.createElement('span');
     ring.className = 'ring';
-    ring.style.borderColor = TARGET_REFERENCE_CIRCLE_COLORS[radius];
+    ring.style.borderColor = targetCircleColor(radius);
     item.appendChild(ring);
     item.appendChild(document.createTextNode(`${radius} km`));
     box.appendChild(item);

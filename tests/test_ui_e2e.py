@@ -85,6 +85,24 @@ IMPACT_CSV = (
     "0,0,0,0,0,0,0,0,0,0,0,0\n"
 )
 
+# M15：4 成员对目标 (20.0, 130.0) 的 CPA 几何确定性分布（风圈列全 0，不干扰）：
+# A 北侧 ~150 km（N/(100,200]）、B 东南 ~500 km（SE/(400,800]）、
+# C 正面 ~1.1 km（<30 km 原点区）、D 以东 ~1200 km（>800 km 环外）
+_CPA_ZEROS = ",".join(["0"] * 12)
+CPA_ROSE_CSV = (
+    "track_id,ensemble_member,init_time,valid_time,lead_time_hours,lat,lon,"
+    "maximum_sustained_wind_speed_knots,minimum_sea_level_pressure_hpa,"
+    f"{_RADIUS_COLS}\n"
+    f"ROSE001,A,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,40,998,{_CPA_ZEROS}\n"
+    f"ROSE001,A,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,21.349,130.0,45,990,{_CPA_ZEROS}\n"
+    f"ROSE001,B,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,38,1000,{_CPA_ZEROS}\n"
+    f"ROSE001,B,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,16.819,133.322,42,992,{_CPA_ZEROS}\n"
+    f"ROSE001,C,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,35,1002,{_CPA_ZEROS}\n"
+    f"ROSE001,C,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,20.01,130.0,36,1001,{_CPA_ZEROS}\n"
+    f"ROSE001,D,2026-09-01T00:00:00Z,2026-09-01T00:00:00Z,0,24.0,138.0,35,1002,{_CPA_ZEROS}\n"
+    f"ROSE001,D,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,24,20.0,141.48,37,999,{_CPA_ZEROS}\n"
+)
+
 # M9：含 basin 列；两地点分属 WP/EP（覆盖洋区过滤与"仍可见保持选中"）
 PLACES_CSV = (
     "name,lat,lon,basin,note\n"
@@ -155,6 +173,11 @@ def live_url_all_low(tmp_path: Path) -> Iterator[str]:
 @pytest.fixture
 def live_url_impact(tmp_path: Path) -> Iterator[str]:
     yield from _start_server(tmp_path, IMPACT_CSV.encode(), places_csv=PLACES_CSV.encode())
+
+
+@pytest.fixture
+def live_url_rose(tmp_path: Path) -> Iterator[str]:
+    yield from _start_server(tmp_path, CPA_ROSE_CSV.encode())
 
 
 @pytest.fixture
@@ -595,6 +618,28 @@ def test_target_by_inputs_renders_marker_circles_and_impact(page, live_url_impac
     assert page.locator("#impact-wrap").get_attribute("data-impact-total") == "2"
 
 
+def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
+    # M15：CPA 距离分档数值行 + 混合玫瑰图（散点 + 环外注记）。
+    # 几何构造（目标 20,130）：C ~1.1 km 原点区计入 ≤100；A ~150 km 入 ≤200；
+    # B ~500 km 入 ≤800；D ~1200 km 环外不入档不画点
+    _set_target_by_inputs(page, live_url_rose, lat="20.0", lon="130.0")
+    page.wait_for_selector("#impact-wrap:not(.hidden)")
+    page.wait_for_selector("svg.cpa-rose", state="attached")
+    text = page.locator("#impact-body").inner_text()
+    assert "中心最近距离分档（全程时次）" in text
+    assert "CPA 散布（8 方位 × 距离环）" in text
+    assert "中心最近距离 ≤ 100 km" in text and "25.0%" in text and "1/4 成员" in text
+    assert "中心最近距离 ≤ 200 km" in text and "50.0%" in text and "2/4 成员" in text
+    assert "中心最近距离 ≤ 400 km" in text and "2/4 成员" in text
+    assert "中心最近距离 ≤ 800 km" in text and "75.0%" in text and "3/4 成员" in text
+    assert "原点(<30 km): 1" in text and "环外(>800 km): 1" in text
+    rose = page.locator("svg.cpa-rose")
+    assert rose.get_attribute("data-cpa-points") == "3"  # 环外成员 D 不画点
+    assert rose.get_attribute("data-cpa-radii") == "100,200,400,800"
+    assert rose.get_attribute("data-cpa-origin-km") == "30"
+    assert page.locator("svg.cpa-rose circle.cpa-dot").count() == 3
+
+
 def test_target_reference_circles_colored_and_visible(page, live_url_impact: str) -> None:
     # M7a：四圈分级配色（玫红/橙/金/紫）真实绘制在 Canvas 上（像素级可见性抽检）；
     # 色距阈值 1500 已与强度色阶（如 H4 红 #d62828）、成员色、概率圆蓝相互分离
@@ -672,7 +717,10 @@ def test_place_list_selects_target(page, live_url_impact: str) -> None:
     page.wait_for_selector("#impact-wrap:not(.hidden)")
     text = page.locator("#impact-body").inner_text()
     assert "那霸" in text  # 目标行显示预存地名
-    assert text.count("0.0%") == 4  # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）
+    # 远离气旋：三级概率与核心强风区均为 0（M7d 后共 4 行）；M15 起分档 4 行
+    # （全部成员环外，见注记「环外(>800 km): 2」）同样为 0 → 共 8 处 0.0%
+    assert text.count("0.0%") == 8
+    assert "环外(>800 km): 2" in text
     # 选中行高亮 + 「当前目标」行
     assert page.locator("[data-place='那霸']").get_attribute("aria-selected") == "true"
     assert "当前目标：那霸" in page.locator("#place-foot").inner_text()
