@@ -6,8 +6,8 @@
 <title>WNC 台风轨迹工作台</title>
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M15-R3 散点强度着色 bump m15r3 -->
-<link rel="stylesheet" href="/static/style.css?v=m15r3">
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 CSS 立即失效（配合 /static no-cache 长效防陈旧）；M15-R4 散点着色渲染修复 bump m15r4 -->
+<link rel="stylesheet" href="/static/style.css?v=m15r4">
 </head>
 <body>
 <aside id="panel">
@@ -137,7 +137,7 @@
 <script>window.TILE_CONFIG = {{ tile_config|safe }};</script>
 <script>window.STATS_CONFIG = {{ stats_config|safe }};</script>
 <script>window.BASIN_CATALOG = {{ basin_catalog|safe }};</script>
-<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M15-R3 散点强度着色 bump m15r3 -->
-<script type="module" src="/static/app.js?v=m15r3"></script>
+<!-- M8-R1：?v= 使浏览器内启发式缓存的旧 JS 立即失效（配合 /static no-cache 长效防陈旧）；M15-R4 散点着色渲染修复 bump m15r4 -->
+<script type="module" src="/static/app.js?v=m15r4"></script>
 </body>
 </html>

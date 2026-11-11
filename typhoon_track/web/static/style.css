@@ -149,8 +149,8 @@ input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
 .cpa-rose .cpa-ring-label { font-size: 9px; fill: #64748b; text-anchor: middle; }
 .cpa-rose .cpa-sector-label { font-size: 10px; fill: #475569; text-anchor: middle; font-weight: 600; }
 .cpa-rose .cpa-hover-cell { fill: #0ea5e9; fill-opacity: .12; stroke: none; pointer-events: none; }
-.cpa-rose .cpa-dot { fill: #1e293b; fill-opacity: .85; } /* fill 仅作回退；M15-R3 散点按 CPA 时次强度内联着色 */
-.cpa-rose .cpa-dot:hover { fill-opacity: 1; stroke: #0ea5e9; stroke-width: 1.5; } /* M15-R3：内联 fill 盖过 CSS，hover 改描边高亮 */
+.cpa-rose .cpa-dot { fill-opacity: .85; } /* M15-R4：不设 fill——样式表 fill 会覆盖 SVG 呈现属性致散点全深灰，颜色由内联 style 提供 */
+.cpa-rose .cpa-dot:hover { fill-opacity: 1; stroke: #0ea5e9; stroke-width: 1.5; } /* hover 描边高亮（内联 style fill 不受影响） */
 
 /* M8 终生峰值：第三栏聚合卡（强度分布图下方）+ 每成员明细第四栏（默认隐藏，展开后与左/中/右三栏并列） */
 #peak-agg-foot { padding: 0 14px 10px; }

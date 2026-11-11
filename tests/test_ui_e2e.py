@@ -654,21 +654,23 @@ def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
     assert abs(radii_px["A"] - (150.0 / 800) * 132) < 0.2
     assert abs(radii_px["B"] - (500.0 / 800) * 132) < 1.0  # B 构造落点 ~499.9 km
     assert radii_px["C"] < 1.0  # 1.1 km → ~0.2 px，自然圆心簇
-    # M15-R3 强度着色：dot 内联 fill 按 CPA 时次风速取 windColor 色阶（H1 64–82 kt
-    # #ffd166 / TS 34–63 kt #66c2a5）——A CPA 行 70 kt、B 42 / C 36 kt，跨档构造
-    # 防「仍统一色」的假绿；几何（cx/cy）与着色（fill）互不干扰双重锁定
+    # M15-R3 强度着色 + M15-R4 假绿修正：断言**渲染计算样式** getComputedStyle().fill
+    # 而非 fill 属性——SVG 呈现属性层叠优先级最低，会被样式表 fill 规则覆盖（R3 旧
+    # 断言读属性：CSS 残留 fill 把内联属性全盖成深灰而测试假绿）。A CPA 行 70 kt →
+    # H1 #ffd166 = rgb(255, 209, 102)、B 42 / C 36 kt → TS #66c2a5 = rgb(102, 194, 165)，
+    # 跨档构造防「仍统一色」假绿，computed 锁死真实渲染
     fills = page.evaluate(
         """
         () => Object.fromEntries([...document.querySelectorAll('svg.cpa-rose circle.cpa-dot')]
           .map((c) => {
             const member = c.querySelector('title').textContent.match(/成员 (\\w+)/)?.[1];
-            return [member, c.getAttribute('fill')];
+            return [member, getComputedStyle(c).fill];
           }))
         """
     )
-    assert fills["A"] == "#ffd166"
-    assert fills["B"] == "#66c2a5"
-    assert fills["C"] == "#66c2a5"
+    assert fills["A"] == "rgb(255, 209, 102)"
+    assert fills["B"] == "rgb(102, 194, 165)"
+    assert fills["C"] == "rgb(102, 194, 165)"
     # M15-R1 readout：默认态常显 成员/原点/环外（含比例）
     readout = page.locator("[data-cpa-readout]")
     assert readout.inner_text() == "成员 4 · 原点 1 (25.0%) · 环外 1 (25.0%)"

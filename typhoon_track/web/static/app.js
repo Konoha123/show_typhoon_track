@@ -1252,7 +1252,9 @@ function renderCpaRoseHtml(data) {
 }
 
 function cpaDotHtml(x, y, fill, title) {
-  return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${fill}"><title>${escapeHtml(title)}</title></circle>`;
+  // M15-R4：内联 style 传色而非 fill 属性——SVG 呈现属性在层叠中优先级最低，
+  // 会被样式表规则覆盖（R3 教训：属性在而渲染色不在，全浏览器统一深灰）
+  return `<circle class="cpa-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" style="fill:${fill}"><title>${escapeHtml(title)}</title></circle>`;
 }
 
 function cpaRoseDefaultReadout(data, total) {
