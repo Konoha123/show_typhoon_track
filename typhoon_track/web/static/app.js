@@ -1306,8 +1306,10 @@ function attachCpaRoseHover(data) {
     const radius = radii[ringIdx];
     const loKm = ringIdx === 0 ? CPA_ORIGIN_KM : radii[ringIdx - 1];
     const count = cellCounts.get(`${sector}:${radius}`) ?? 0;
-    // 扇环楔形：外弧顺时针（sweep=1）、内弧逆时针（sweep=0）、45° < 180°（large-arc=0）
-    const a0 = 22.5 + sectorIdx * 45;
+    // 扇环楔形：外弧顺时针（sweep=1）、内弧逆时针（sweep=0）、45° < 180°（large-arc=0）。
+    // 扇区 k 的角域 = [22.5+(k-1)·45, 22.5+k·45)（22.5°+k·45 为终止边界：边界归顺时针
+    // 下一扇区，同 compass_8）；N 扇区起始 -22.5°≡337.5° 跨 0°，cpaPolar 三角周期性天然处理
+    const a0 = 22.5 + (sectorIdx - 1) * 45;
     const [xo, yo] = cpaPolar(a0, kmToPx(radius));
     const [x1, y1] = cpaPolar(a0 + 45, kmToPx(radius));
     const [xi, yi] = cpaPolar(a0 + 45, kmToPx(loKm));

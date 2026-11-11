@@ -666,6 +666,25 @@ def test_cpa_rose_bands_scatter_and_note(page, live_url_rose: str) -> None:
     assert readout.inner_text() == "N (100–200] km | 1 (25.0%)"
     rose_wrap = page.locator(".cpa-rose-wrap")
     assert rose_wrap.get_attribute("data-hover-bin") == "N:200"
+    # M15-R2 回归锁定：wedge 首点（a0 处外弧起点）应为 polar(337.5°, 200/800×132)——
+    # 旧实现 a0 = 22.5 + sectorIdx·45 将 N 扇区楔形画进 NE 角域（off-by-one 顺时针
+    # 偏移一格）；N 扇区跨 0°（a0=−22.5°≡337.5°），本断言同时锁死 wrap 场景
+    wedge_check = page.evaluate(
+        """
+        () => {
+          const d = document.querySelector('svg.cpa-rose [data-hover-cell]').getAttribute('d');
+          const m = d.match(/^M ([\\d.]+) ([\\d.]+)/);
+          if (!m) return null;
+          const r = (200 / 800) * 132;  // kmToPx(200)
+          const a = 337.5 * Math.PI / 180;  // N 扇区起始角：22.5 + (0-1)*45
+          return { x: parseFloat(m[1]), y: parseFloat(m[2]),
+                   ex: 160 + r * Math.sin(a), ey: 160 - r * Math.cos(a) };
+        }
+        """
+    )
+    assert wedge_check is not None and wedge_check["x"] > 0
+    assert abs(wedge_check["x"] - wedge_check["ex"]) < 0.2
+    assert abs(wedge_check["y"] - wedge_check["ey"]) < 0.2
     page.mouse.move(10, 10)
     page.wait_for_timeout(100)
     assert readout.inner_text() == "成员 4 · 原点 1 (25.0%) · 环外 1 (25.0%)"
